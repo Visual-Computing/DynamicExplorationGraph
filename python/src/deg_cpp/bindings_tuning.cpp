@@ -103,15 +103,30 @@ void bind_tuning(nb::module_& m) {
     );
     tuning_module.def(
         "predict_optimization_target",
-        [measure_profile_py](
+        [parse_tuning_array](
             const InArray& data, deglib::distances::MetricType metric, size_t sample_count, size_t query_count, uint32_t seed, size_t threads
         ) {
-            const auto profile = measure_profile_py(data, metric, sample_count, query_count, seed, threads);
-            return deglib::tuning::predict_optimization_target(profile);
+            const void* ptr = nullptr;
+            uint32_t dim = 0;
+            size_t count = 0;
+            bool is_fp16 = false;
+            parse_tuning_array(data, ptr, dim, count, is_fp16);
+            const deglib::distances::Metric resolved_metric(metric);
+            nb::gil_scoped_release release;
+            if (is_fp16) {
+                return deglib::tuning::predict_optimization_target(
+                    std::span<const uint16_t>(static_cast<const uint16_t*>(ptr), count * static_cast<size_t>(dim)),
+                    dim, resolved_metric, sample_count, query_count, seed, threads
+                );
+            }
+            return deglib::tuning::predict_optimization_target(
+                std::span<const float>(static_cast<const float*>(ptr), count * static_cast<size_t>(dim)),
+                dim, resolved_metric, sample_count, query_count, seed, threads
+            );
         },
         nb::arg("data"), nb::arg("metric") = deglib::distances::MetricType::FP32_L2, nb::arg("sample_count") = deglib::tuning::kDefaultSampleCount,
         nb::arg("query_count") = deglib::tuning::kDefaultQueryCount, nb::arg("seed") = deglib::tuning::kDefaultSeed, nb::arg("threads") = 0,
-        "Measure a DatasetProfile and predict OptimizationTarget from a 2D float32 or float16 array."
+        "Predict OptimizationTarget (LowLID vs StreamingData) from a 2D float32 or float16 array using T4-QSkew."
     );
     tuning_module.def(
         "predict_quantization",

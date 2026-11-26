@@ -154,6 +154,20 @@ struct NormalizedQuantizationCalibration {
 
 inline constexpr NormalizedQuantizationCalibration kDefaultNormalizedQuantizationCalibration{};
 
+/**
+ * Calibration constants for T4-QSkew OptimizationTarget predictor (single 4-feature model).
+ * Features: [cpp_had_kurt, indeg16_p99_p50, s_indeg32_skew, s_u7_i8_corr_diff] (lam=0.02, T=2.0).
+ * 16/16 LOO, 16/16 10-seed stable (160/160 seeds), rho=0.9412, LOO-RMSE=0.0405.
+ */
+struct T4QSkewTargetCalibration {
+    double mu[4] = {0.016587788510, 5.322411023352, 2.570807469385, 0.000600086523};
+    double sd[4] = {0.096011387965, 1.835138103203, 2.488086912882, 0.001484178014};
+    double w[5] = {-0.014395329005, 0.165101510879, -0.143612000605, 0.073826157910, 0.049135871585};
+    double tanh_temp = 2.0;
+};
+
+inline constexpr T4QSkewTargetCalibration kDefaultT4QSkewTargetCalibration{};
+
 namespace detail {
 
 inline size_t resolve_thread_count(size_t num_threads) noexcept {
@@ -1411,7 +1425,8 @@ inline void subspace_top_ratios(
     uint32_t seed,
     double& out_top1,
     double& out_top10,
-    double& out_top32
+    double& out_top32,
+    double* out_top2 = nullptr
 ) {
     const size_t r_sub = (std::min)(static_cast<size_t>(dim), r_sub_req);
     std::vector<float> Q_sub(dim * r_sub);
@@ -1493,14 +1508,16 @@ inline void subspace_top_ratios(
     std::vector<double> evals;
     jacobi_eigenvalues_sym(G_sub, r_sub, evals);
     const double inv_f = 1.0 / (std::max)(frob2, 1e-18);
-    double s1 = 0.0, s10 = 0.0, s32 = 0.0;
+    double s1 = 0.0, s2 = 0.0, s10 = 0.0, s32 = 0.0;
     for (size_t i = 0; i < r_sub; ++i) {
         const double ev = (std::max)(0.0, evals[i]);
         if (i < 1) s1 += ev;
+        if (i < 2) s2 += ev;
         if (i < 10) s10 += ev;
         if (i < 32) s32 += ev;
     }
     out_top1 = s1 * inv_f;
+    if (out_top2) *out_top2 = s2 * inv_f;
     out_top10 = s10 * inv_f;
     out_top32 = s32 * inv_f;
 }
@@ -1856,40 +1873,6 @@ predict_optimization_target(const DatasetProfile& profile, const TargetModelCali
 }
 
 /**
- * Measure a DatasetProfile and predict the optimal graph construction target from FP32 vectors.
- */
-[[nodiscard]] inline TargetPrediction predict_optimization_target(
-    std::span<const float> data,
-    uint32_t dim,
-    deglib::distances::Metric metric = deglib::distances::Metric::FP32_L2,
-    size_t sample_count = kDefaultSampleCount,
-    size_t query_count = kDefaultQueryCount,
-    uint32_t seed = kDefaultSeed,
-    size_t num_threads = 0,
-    const TargetModelCalibration& cal = kDefaultTargetCalibration
-) {
-    const DatasetProfile profile = measure_dataset_profile(data, dim, metric, sample_count, query_count, seed, num_threads);
-    return predict_optimization_target(profile, cal);
-}
-
-/**
- * Measure a DatasetProfile and predict the optimal graph construction target from FP16 vectors.
- */
-[[nodiscard]] inline TargetPrediction predict_optimization_target(
-    std::span<const uint16_t> data_fp16,
-    uint32_t dim,
-    deglib::distances::Metric metric = deglib::distances::Metric::FP32_L2,
-    size_t sample_count = kDefaultSampleCount,
-    size_t query_count = kDefaultQueryCount,
-    uint32_t seed = kDefaultSeed,
-    size_t num_threads = 0,
-    const TargetModelCalibration& cal = kDefaultTargetCalibration
-) {
-    const DatasetProfile profile = measure_dataset_profile(data_fp16, dim, metric, sample_count, query_count, seed, num_threads);
-    return predict_optimization_target(profile, cal);
-}
-
-/**
  * Predict the optimal quantizer metric (Uint7_L2 vs Int8_InnerProduct) from raw, unnormalized FP32 vectors
  * using the K5-Top model (intended for `deglib.build(..., compress="8bit")`).
  *
@@ -2012,6 +1995,503 @@ predict_optimization_target(const DatasetProfile& profile, const TargetModelCali
     }
     const std::vector<float> sampled = detail::sample_fp16_rows(data_fp16, dim, sample_count, seed);
     return detail::predict_quantization_a1a2_from_sampled(sampled, dim, is_cosine, metric, seed, num_threads, cal);
+}
+
+namespace detail {
+
+// Prepare graph-build space Xb (L2, S for unit-norm IP, or MIPS(d+1) for unnormalized IP) and L2-normalized S.
+inline void prepare_target_spaces(
+    const std::vector<float>& sampled,
+    uint32_t dim,
+    deglib::distances::Metric metric,
+    size_t threads,
+    std::vector<float>& out_Xb,
+    uint32_t& out_xb_dim,
+    std::vector<float>& out_S,
+    bool& out_same_space
+) {
+    const size_t n = sampled.size() / dim;
+    std::vector<float> norms;
+    normalize_rows_l2(sampled.data(), n, dim, threads, out_S, &norms, false);
+
+    if (metric.get_distance_kind() != deglib::distances::MetricDistanceKind::InnerProduct) {
+        out_Xb = sampled;
+        out_xb_dim = dim;
+        out_same_space = false;
+        return;
+    }
+
+    float max_norm = 0.0f;
+    double max_unit_dev = 0.0;
+    for (float nm : norms) {
+        if (nm > max_norm) max_norm = nm;
+        max_unit_dev = (std::max)(max_unit_dev, std::abs(static_cast<double>(nm) - 1.0));
+    }
+
+    if (max_unit_dev < 1e-3) {
+        out_Xb = out_S;
+        out_xb_dim = dim;
+        out_same_space = true;
+        return;
+    }
+
+    out_xb_dim = dim + 1;
+    out_Xb.resize(n * out_xb_dim);
+    const double M = static_cast<double>(max_norm) * 1.0001;
+    const double M2 = M * M;
+    deglib::concurrent::parallel_batch_for(
+        size_t{0}, n, threads,
+        [&](size_t begin, size_t end, size_t /*tid*/) {
+            for (size_t i = begin; i < end; ++i) {
+                const float* src = sampled.data() + i * dim;
+                float* dst = out_Xb.data() + i * out_xb_dim;
+                std::memcpy(dst, src, static_cast<size_t>(dim) * sizeof(float));
+                const double nm = static_cast<double>(norms[i]);
+                dst[dim] = static_cast<float>(std::sqrt((std::max)(0.0, M2 - nm * nm)));
+            }
+        },
+        16
+    );
+    out_same_space = false;
+}
+
+// Blocked AVX2 SGEMM exact top-k_nn Euclidean distances & neighbor indices on arbitrary FP32 vectors.
+inline void knn_top_k_l2(
+    const float* data,
+    size_t n,
+    uint32_t dim,
+    size_t k_nn,
+    size_t threads,
+    std::vector<float>& out_dists,
+    std::vector<uint32_t>& out_indices
+) {
+    const GemmPanelFn gemm_panel_fn = resolve_gemm_panel_fn();
+    deglib::distances::FloatSpace l2_space(dim, deglib::distances::Metric::FP32_L2);
+    const auto dist_func = l2_space.get_dist_func();
+    const void* param = l2_space.get_dist_func_param();
+
+    std::vector<float> x_norms2(n, 0.0f);
+    for (size_t i = 0; i < n; ++i) {
+        const float* row = data + i * dim;
+        double s = 0.0;
+        for (uint32_t d = 0; d < dim; ++d) s += static_cast<double>(row[d]) * static_cast<double>(row[d]);
+        x_norms2[i] = static_cast<float>(s);
+    }
+
+    const size_t num_q_tiles = (n + kTileM - 1) / kTileM;
+    const size_t actual_threads = (std::min)(threads, num_q_tiles);
+    std::vector<TileScratch> scratch(actual_threads);
+    out_dists.assign(n * k_nn, (std::numeric_limits<float>::infinity)());
+    out_indices.assign(n * k_nn, 0u);
+
+    deglib::concurrent::parallel_batch_for(
+        size_t{0}, num_q_tiles, actual_threads,
+        [&](size_t begin, size_t end, size_t tid) {
+            TileScratch& sc = scratch[tid];
+            std::vector<float> row_d2(kTileM * k_nn);
+            std::vector<uint32_t> row_idx(kTileM * k_nn);
+            for (size_t qt = begin; qt < end; ++qt) {
+                const size_t i0 = qt * kTileM;
+                const size_t bm = (std::min)(kTileM, n - i0);
+                const size_t bm_pad = (bm + 3) & ~size_t{3};
+                std::fill(row_d2.begin(), row_d2.end(), (std::numeric_limits<float>::infinity)());
+                std::fill(row_idx.begin(), row_idx.end(), 0u);
+                float kth_d2[kTileM];
+                std::fill_n(kth_d2, bm, (std::numeric_limits<float>::infinity)());
+
+                for (size_t j0 = 0; j0 < n; j0 += kTileN) {
+                    const size_t bn = (std::min)(kTileN, n - j0);
+                    const size_t bn_pad = (bn + 3) & ~size_t{3};
+                    std::fill_n(sc.c_tile.data(), bm_pad * kTileN, 0.0f);
+                    for (size_t k0 = 0; k0 < dim; k0 += kTileK) {
+                        const size_t bk = (std::min)(static_cast<size_t>(dim) - k0, kTileK);
+                        const size_t bk_pad = (bk + 15) & ~size_t{15};
+                        pack_panel(data, dim, i0, bm, k0, bk, bm_pad, bk_pad, sc.a_panel.data());
+                        pack_panel(data, dim, j0, bn, k0, bk, bn_pad, bk_pad, sc.b_panel.data());
+                        gemm_panel_fn(sc.a_panel.data(), bm_pad, sc.b_panel.data(), bn_pad, bk_pad, sc.c_tile.data());
+                    }
+                    for (size_t r = 0; r < bm; ++r) {
+                        const size_t qi = i0 + r;
+                        float* rd = row_d2.data() + r * k_nn;
+                        uint32_t* ri = row_idx.data() + r * k_nn;
+                        float worst = kth_d2[r];
+                        const float* c_row = sc.c_tile.data() + r * kTileN;
+                        const float* q_ptr = data + qi * dim;
+                        const float q_n2 = x_norms2[qi];
+                        const float err_margin = (std::max)(2e-3f, static_cast<float>(dim) * 1e-6f) * (q_n2 + 1.0f);
+                        for (size_t c = 0; c < bn; ++c) {
+                            const size_t db_row = j0 + c;
+                            if (db_row == qi) continue;
+                            const float d2_approx = q_n2 + x_norms2[db_row] - 2.0f * c_row[c];
+                            if (d2_approx <= worst + err_margin) {
+                                const float d2 = dist_func(q_ptr, data + db_row * dim, param);
+                                if (d2 < worst) {
+                                    size_t max_pos = 0;
+                                    for (size_t k = 1; k < k_nn; ++k) {
+                                        if (rd[k] > rd[max_pos]) max_pos = k;
+                                    }
+                                    rd[max_pos] = d2;
+                                    ri[max_pos] = static_cast<uint32_t>(db_row);
+                                    float nw = rd[0];
+                                    for (size_t k = 1; k < k_nn; ++k) {
+                                        if (rd[k] > nw) nw = rd[k];
+                                    }
+                                    worst = nw;
+                                }
+                            }
+                        }
+                        kth_d2[r] = worst;
+                    }
+                }
+                for (size_t r = 0; r < bm; ++r) {
+                    const size_t qi = i0 + r;
+                    std::vector<std::pair<float, uint32_t>> pairs(k_nn);
+                    for (size_t k = 0; k < k_nn; ++k) {
+                        pairs[k] = {std::sqrt((std::max)(0.0f, row_d2[r * k_nn + k])), row_idx[r * k_nn + k]};
+                    }
+                    std::sort(pairs.begin(), pairs.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+                    for (size_t k = 0; k < k_nn; ++k) {
+                        out_dists[qi * k_nn + k] = pairs[k].first;
+                        out_indices[qi * k_nn + k] = pairs[k].second;
+                    }
+                }
+            }
+        },
+        1
+    );
+}
+
+struct IndegreeStats {
+    double p99_p50 = 1.0;
+    double skew = 0.0;
+    double top1pct_mass = 0.0;
+};
+
+inline IndegreeStats compute_indegree_stats(const std::vector<uint32_t>& knn_idx, size_t n, size_t stride, size_t k_use) {
+    std::vector<double> indeg(n, 0.0);
+    for (size_t i = 0; i < n; ++i) {
+        const uint32_t* row = knn_idx.data() + i * stride;
+        for (size_t k = 0; k < k_use; ++k) {
+            const uint32_t nb = row[k];
+            if (nb < n) indeg[nb] += 1.0;
+        }
+    }
+    double sum = 0.0;
+    for (double v : indeg) sum += v;
+    const double mean = sum / static_cast<double>(n);
+    double var_sum = 0.0;
+    for (double v : indeg) {
+        const double dv = v - mean;
+        var_sum += dv * dv;
+    }
+    const double sd = (std::max)(std::sqrt(var_sum / static_cast<double>(n)), 1e-12);
+    double skew_sum = 0.0;
+    for (double v : indeg) {
+        const double z = (v - mean) / sd;
+        skew_sum += z * z * z;
+    }
+    std::sort(indeg.begin(), indeg.end());
+    const double p50 = (std::max)(sorted_percentile(indeg, 0.50), 1.0);
+    const double p99 = sorted_percentile(indeg, 0.99);
+    const size_t top1_n = (std::max)(size_t{1}, n / 100);
+    double top1_sum = 0.0;
+    for (size_t i = n - top1_n; i < n; ++i) top1_sum += indeg[i];
+    return IndegreeStats{
+        p99 / p50,
+        skew_sum / static_cast<double>(n),
+        top1_sum / (std::max)(sum, 1.0),
+    };
+}
+
+inline double compute_ball_cnt_mean_l2(const float* data, size_t n, uint32_t dim, double radius, size_t threads) {
+    const GemmPanelFn gemm_panel_fn = resolve_gemm_panel_fn();
+    deglib::distances::FloatSpace l2_space(dim, deglib::distances::Metric::FP32_L2);
+    const auto dist_func = l2_space.get_dist_func();
+    const void* param = l2_space.get_dist_func_param();
+
+    std::vector<float> x_norms2(n, 0.0f);
+    for (size_t i = 0; i < n; ++i) {
+        const float* row = data + i * dim;
+        double s = 0.0;
+        for (uint32_t d = 0; d < dim; ++d) s += static_cast<double>(row[d]) * static_cast<double>(row[d]);
+        x_norms2[i] = static_cast<float>(s);
+    }
+
+    const float rad2 = static_cast<float>(radius * radius);
+    const size_t num_q_tiles = (n + kTileM - 1) / kTileM;
+    const size_t actual_threads = (std::min)(threads, num_q_tiles);
+    std::vector<TileScratch> scratch(actual_threads);
+    std::vector<uint64_t> counts(n, 0);
+
+    deglib::concurrent::parallel_batch_for(
+        size_t{0}, num_q_tiles, actual_threads,
+        [&](size_t begin, size_t end, size_t tid) {
+            TileScratch& sc = scratch[tid];
+            for (size_t qt = begin; qt < end; ++qt) {
+                const size_t i0 = qt * kTileM;
+                const size_t bm = (std::min)(kTileM, n - i0);
+                const size_t bm_pad = (bm + 3) & ~size_t{3};
+                for (size_t j0 = 0; j0 < n; j0 += kTileN) {
+                    const size_t bn = (std::min)(kTileN, n - j0);
+                    const size_t bn_pad = (bn + 3) & ~size_t{3};
+                    std::fill_n(sc.c_tile.data(), bm_pad * kTileN, 0.0f);
+                    for (size_t k0 = 0; k0 < dim; k0 += kTileK) {
+                        const size_t bk = (std::min)(static_cast<size_t>(dim) - k0, kTileK);
+                        const size_t bk_pad = (bk + 15) & ~size_t{15};
+                        pack_panel(data, dim, i0, bm, k0, bk, bm_pad, bk_pad, sc.a_panel.data());
+                        pack_panel(data, dim, j0, bn, k0, bk, bn_pad, bk_pad, sc.b_panel.data());
+                        gemm_panel_fn(sc.a_panel.data(), bm_pad, sc.b_panel.data(), bn_pad, bk_pad, sc.c_tile.data());
+                    }
+                    for (size_t r = 0; r < bm; ++r) {
+                        const size_t qi = i0 + r;
+                        const float* c_row = sc.c_tile.data() + r * kTileN;
+                        const float* q_ptr = data + qi * dim;
+                        const float q_n2 = x_norms2[qi];
+                        const float tol = (std::max)(2e-3f, static_cast<float>(dim) * 1e-6f) * (q_n2 + 1.0f);
+                        uint64_t cnt = 0;
+                        for (size_t c = 0; c < bn; ++c) {
+                            const size_t db_row = j0 + c;
+                            const float d2_approx = q_n2 + x_norms2[db_row] - 2.0f * c_row[c];
+                            if (d2_approx <= rad2 - tol) {
+                                ++cnt;
+                            } else if (d2_approx <= rad2 + tol) {
+                                if (dist_func(q_ptr, data + db_row * dim, param) <= rad2) ++cnt;
+                            }
+                        }
+                        counts[qi] += cnt;
+                    }
+                }
+            }
+        },
+        1
+    );
+
+    uint64_t tot = 0;
+    for (uint64_t c : counts) tot += c;
+    return static_cast<double>(tot) / static_cast<double>(n);
+}
+
+inline double compute_s_u7_i8_corr_diff(const std::vector<float>& S, size_t n, uint32_t dim, size_t threads) {
+    const size_t sub_q = (std::min)(n, size_t{256});
+    const size_t top_k = (std::min)(n, size_t{100});
+    if (top_k < 3) return 0.0;
+
+    std::vector<float> dmin(dim, (std::numeric_limits<float>::infinity)());
+    std::vector<float> dmax(dim, -(std::numeric_limits<float>::infinity)());
+    for (size_t i = 0; i < n; ++i) {
+        const float* row = S.data() + i * dim;
+        for (uint32_t d = 0; d < dim; ++d) {
+            if (row[d] < dmin[d]) dmin[d] = row[d];
+            if (row[d] > dmax[d]) dmax[d] = row[d];
+        }
+    }
+
+    std::vector<float> Xq_u7(n * dim);
+    std::vector<float> Xq_i8(n * dim);
+    std::vector<float> n2_exact(n, 0.0f);
+    std::vector<float> n2_u7(n, 0.0f);
+    std::vector<float> abs_max(dim);
+    std::vector<float> span(dim);
+    for (uint32_t d = 0; d < dim; ++d) {
+        span[d] = (std::max)(dmax[d] - dmin[d], 1e-12f);
+        abs_max[d] = (std::max)((std::max)(std::abs(dmin[d]), std::abs(dmax[d])), 1e-12f);
+    }
+    for (size_t i = 0; i < n; ++i) {
+        const float* src = S.data() + i * dim;
+        float* du7 = Xq_u7.data() + i * dim;
+        float* di8 = Xq_i8.data() + i * dim;
+        double s_ex = 0.0, s_u7 = 0.0;
+        for (uint32_t d = 0; d < dim; ++d) {
+            const float u7 = std::round((src[d] - dmin[d]) / span[d] * 127.0f) * (span[d] / 127.0f) + dmin[d];
+            const float i8 = std::round(src[d] / abs_max[d] * 127.0f) * (abs_max[d] / 127.0f);
+            du7[d] = u7;
+            di8[d] = i8;
+            s_ex += static_cast<double>(src[d]) * static_cast<double>(src[d]);
+            s_u7 += static_cast<double>(u7) * static_cast<double>(u7);
+        }
+        n2_exact[i] = static_cast<float>(s_ex);
+        n2_u7[i] = static_cast<float>(s_u7);
+    }
+
+    auto pearson = [](const std::vector<double>& a, const std::vector<double>& b) -> double {
+        const size_t m = a.size();
+        double ma = 0.0, mb = 0.0;
+        for (size_t i = 0; i < m; ++i) {
+            ma += a[i];
+            mb += b[i];
+        }
+        ma /= static_cast<double>(m);
+        mb /= static_cast<double>(m);
+        double num = 0.0, va = 0.0, vb = 0.0;
+        for (size_t i = 0; i < m; ++i) {
+            const double da = a[i] - ma;
+            const double db = b[i] - mb;
+            num += da * db;
+            va += da * da;
+            vb += db * db;
+        }
+        const double den = std::sqrt(va * vb);
+        return (den > 1e-18) ? (num / den) : 0.0;
+    };
+
+    std::vector<double> diffs(sub_q, 0.0);
+    deglib::concurrent::parallel_batch_for(
+        size_t{0}, sub_q, threads,
+        [&](size_t begin, size_t end, size_t /*tid*/) {
+            std::vector<std::pair<float, size_t>> d2_list(n);
+            std::vector<double> ex_s(top_k), u7_s(top_k), ex_ip(top_k), i8_ip(top_k);
+            for (size_t u = begin; u < end; ++u) {
+                const float* q_ex = S.data() + u * dim;
+                const float* q_u7 = Xq_u7.data() + u * dim;
+                const float* q_i8 = Xq_i8.data() + u * dim;
+                for (size_t j = 0; j < n; ++j) {
+                    const float* b_ex = S.data() + j * dim;
+                    float dot_ex = 0.0f;
+                    for (uint32_t d = 0; d < dim; ++d) dot_ex += q_ex[d] * b_ex[d];
+                    d2_list[j] = {n2_exact[u] + n2_exact[j] - 2.0f * dot_ex, j};
+                }
+                std::nth_element(d2_list.begin(), d2_list.begin() + top_k, d2_list.end(),
+                                 [](const auto& a, const auto& b) { return a.first < b.first; });
+                for (size_t k = 0; k < top_k; ++k) {
+                    const size_t j = d2_list[k].second;
+                    const float* b_ex = S.data() + j * dim;
+                    const float* b_u7 = Xq_u7.data() + j * dim;
+                    const float* b_i8 = Xq_i8.data() + j * dim;
+                    float dot_ex = 0.0f, dot_u7 = 0.0f, dot_i8 = 0.0f;
+                    for (uint32_t d = 0; d < dim; ++d) {
+                        dot_ex += q_ex[d] * b_ex[d];
+                        dot_u7 += q_u7[d] * b_u7[d];
+                        dot_i8 += q_i8[d] * b_i8[d];
+                    }
+                    ex_s[k] = -static_cast<double>(d2_list[k].first);
+                    u7_s[k] = -static_cast<double>(n2_u7[u] + n2_u7[j] - 2.0f * dot_u7);
+                    ex_ip[k] = static_cast<double>(dot_ex);
+                    i8_ip[k] = static_cast<double>(dot_i8);
+                }
+                diffs[u] = pearson(ex_s, u7_s) - pearson(ex_ip, i8_ip);
+            }
+        },
+        4
+    );
+
+    double sum = 0.0;
+    for (double v : diffs) sum += v;
+    return sum / static_cast<double>(sub_q);
+}
+
+inline TargetPrediction predict_target_t4_qskew_from_sampled(
+    const std::vector<float>& sampled,
+    uint32_t dim,
+    deglib::distances::Metric metric,
+    uint32_t seed,
+    size_t num_threads,
+    const T4QSkewTargetCalibration& cal
+) {
+    const size_t n = sampled.size() / dim;
+    DatasetProfile prof{};
+    prof.sample_count = static_cast<uint32_t>(n);
+    prof.dim = dim;
+    prof.metric = metric;
+    if (n < 33) {
+        return TargetPrediction{deglib::builder::OptimizationTarget::StreamingData, 0.0f, prof};
+    }
+
+    const size_t threads = resolve_thread_count(num_threads);
+    std::vector<float> Xb, S;
+    uint32_t xb_dim = dim;
+    bool same_space = false;
+    prepare_target_spaces(sampled, dim, metric, threads, Xb, xb_dim, S, same_space);
+
+    const double had_kurt = static_cast<double>(compute_hadamard_kurt(Xb.data(), n, xb_dim, seed, threads));
+    std::vector<float> xb_d, s_d;
+    std::vector<uint32_t> xb_idx, s_idx;
+    double indeg16_p99_p50 = 1.0;
+    double s_indeg32_skew = 0.0;
+    if (same_space) {
+        knn_top_k_l2(S.data(), n, dim, 32, threads, s_d, s_idx);
+        indeg16_p99_p50 = compute_indegree_stats(s_idx, n, 32, 16).p99_p50;
+        s_indeg32_skew = compute_indegree_stats(s_idx, n, 32, 32).skew;
+    } else {
+        knn_top_k_l2(Xb.data(), n, xb_dim, 16, threads, xb_d, xb_idx);
+        indeg16_p99_p50 = compute_indegree_stats(xb_idx, n, 16, 16).p99_p50;
+        knn_top_k_l2(S.data(), n, dim, 32, threads, s_d, s_idx);
+        s_indeg32_skew = compute_indegree_stats(s_idx, n, 32, 32).skew;
+    }
+    double sum_s_d16 = 0.0;
+    for (size_t i = 0; i < n; ++i) sum_s_d16 += static_cast<double>(s_d[i * 32 + 15]);
+    if (sum_s_d16 <= 1e-12 * static_cast<double>(n)) {
+        return TargetPrediction{deglib::builder::OptimizationTarget::StreamingData, 0.0f, prof};
+    }
+    const double s_u7_i8_corr_diff = compute_s_u7_i8_corr_diff(S, n, dim, threads);
+
+    const double f[4] = {had_kurt, indeg16_p99_p50, s_indeg32_skew, s_u7_i8_corr_diff};
+    double log2_score = cal.w[0];
+    for (int i = 0; i < 4; ++i) {
+        log2_score += cal.w[i + 1] * std::tanh(((f[i] - cal.mu[i]) / cal.sd[i]) / cal.tanh_temp);
+    }
+    const float adv_pct = static_cast<float>((std::exp2(log2_score) - 1.0) * 100.0);
+    const auto target = (adv_pct > 0.0f) ? deglib::builder::OptimizationTarget::LowLID : deglib::builder::OptimizationTarget::StreamingData;
+    return TargetPrediction{target, adv_pct, prof};
+}
+
+}  // namespace detail
+
+/**
+ * Predict the optimal graph construction target (LowLID vs StreamingData) from FP32 vectors
+ * using the 4-feature T4-QSkew model (hadamard_kurt, indeg16_p99_p50, s_indeg32_skew, s_u7_i8_corr_diff).
+ */
+[[nodiscard]] inline TargetPrediction predict_optimization_target(
+    std::span<const float> data,
+    uint32_t dim,
+    deglib::distances::Metric metric = deglib::distances::Metric::FP32_L2,
+    size_t sample_count = kDefaultSampleCount,
+    size_t /*query_count*/ = kDefaultQueryCount,
+    uint32_t seed = kDefaultSeed,
+    size_t num_threads = 0,
+    const T4QSkewTargetCalibration& cal = kDefaultT4QSkewTargetCalibration
+) {
+    if (dim == 0) {
+        throw std::invalid_argument("predict_optimization_target: dim must be greater than 0");
+    }
+    if (data.size() % dim != 0) {
+        throw std::invalid_argument("predict_optimization_target: data size must be an exact multiple of dim");
+    }
+    const size_t total_rows = data.size() / dim;
+    if (total_rows < 33) {
+        DatasetProfile prof{static_cast<uint32_t>(total_rows), dim, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, metric};
+        return TargetPrediction{deglib::builder::OptimizationTarget::StreamingData, 0.0f, prof};
+    }
+    const std::vector<float> sampled = detail::sample_fp32_rows(data, dim, sample_count, seed);
+    return detail::predict_target_t4_qskew_from_sampled(sampled, dim, metric, seed, num_threads, cal);
+}
+
+/**
+ * Predict the optimal graph construction target (LowLID vs StreamingData) from FP16 vectors
+ * using the 4-feature T4-QSkew model.
+ */
+[[nodiscard]] inline TargetPrediction predict_optimization_target(
+    std::span<const uint16_t> data_fp16,
+    uint32_t dim,
+    deglib::distances::Metric metric = deglib::distances::Metric::FP32_L2,
+    size_t sample_count = kDefaultSampleCount,
+    size_t /*query_count*/ = kDefaultQueryCount,
+    uint32_t seed = kDefaultSeed,
+    size_t num_threads = 0,
+    const T4QSkewTargetCalibration& cal = kDefaultT4QSkewTargetCalibration
+) {
+    if (dim == 0) {
+        throw std::invalid_argument("predict_optimization_target: dim must be greater than 0");
+    }
+    if (data_fp16.size() % dim != 0) {
+        throw std::invalid_argument("predict_optimization_target: data size must be an exact multiple of dim");
+    }
+    const size_t total_rows = data_fp16.size() / dim;
+    if (total_rows < 33) {
+        DatasetProfile prof{static_cast<uint32_t>(total_rows), dim, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, metric};
+        return TargetPrediction{deglib::builder::OptimizationTarget::StreamingData, 0.0f, prof};
+    }
+    const std::vector<float> sampled = detail::sample_fp16_rows(data_fp16, dim, sample_count, seed);
+    return detail::predict_target_t4_qskew_from_sampled(sampled, dim, metric, seed, num_threads, cal);
 }
 
 }  // namespace deglib::tuning
