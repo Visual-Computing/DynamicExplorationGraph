@@ -1093,8 +1093,8 @@ def compress(
           unnormalized ``InnerProduct``), or ``deglib.tuning.predict_quantization``
           (``Uint7_L2`` vs. ``Int8_InnerProduct``) for unit-sphere ``cosine``/``normalized``
           graphs.
-        - ``"4bit"``: Always ``Uint4_L2`` (preserving ``L2NormalizeTransform`` on cosine
-          graphs; auto-prepending ``MipsTransform`` on unnormalized ``InnerProduct`` graphs).
+        - ``"4bit"``: ``Uint4_L2`` on L2 and ``cosine``/``normalized`` graphs; ``Int4_InnerProduct``
+          on unnormalized ``InnerProduct`` graphs (avoids ``d+1`` ``MipsTransform`` overhead).
         - ``"2bit"`` (also ``"evp"``): ``EVP_InnerProduct`` (always InnerProduct).
         - Explicit ``Metric`` or metric string (e.g. ``"Int8_L2"``, ``Metric.Uint8_L2``).
     threads : int, default=0
@@ -1133,7 +1133,10 @@ def compress(
             else:
                 target_metric = Metric.Uint7_L2
         elif key == "4bit":
-            target_metric = Metric.Uint4_L2
+            if src_is_ip and not any(t.name == "L2NormalizeTransform" for t in graph.get_transformations()):
+                target_metric = Metric.Int4_InnerProduct
+            else:
+                target_metric = Metric.Uint4_L2
         elif key in ("2bit", "evp"):
             target_metric = Metric.EVP_InnerProduct
         elif "_" in target:

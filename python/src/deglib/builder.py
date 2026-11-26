@@ -327,7 +327,7 @@ def build(
         - ``"ip"`` (also ``"innerproduct"``, ``"inner_product"``, ``"mips"``): Maximum Inner
           Product Search. Builds the graph topology in ``MipsTransform (d+1) + L2`` space
           and swaps stored features back to unnormalized ``InnerProduct`` (or ``compress``
-          target) on the returned ``ReadOnlyGraph``.
+          target).
         - Explicit ``Metric`` or metric string (e.g. ``Metric.Int8_L2``, ``"Uint7_L2"``).
     compress : {"32bit", "16bit", "8bit", "4bit", "2bit", "auto"} or Metric or str, optional
         Optional post-build compression target:
@@ -338,8 +338,8 @@ def build(
         - ``"16bit"`` (also ``"fp16"``, ``"float16"``): ``FP16_L2`` or ``FP16_InnerProduct``.
         - ``"8bit"`` / ``"auto"``: ``Uint7_L2`` (L2), ``Int8_InnerProduct`` or ``Uint7_L2`` (cosine/normalized, auto-selected),
           or ``FastHadamardRotation + Int8_InnerProduct`` (``metric="ip"``).
-        - ``"4bit"``: Always ``Uint4_L2`` (with ``MipsTransform`` for ``metric="ip"``).
-        - ``"2bit"`` (also ``"evp"``): ``EVP_InnerProduct``.
+        - ``"4bit"``: ``Uint4_L2`` (L2 / cosine) or ``Int4_InnerProduct`` (``metric="ip"``, ``d``-dim).
+        - ``"2bit"`` (also ``"evp"``): ``EVP_InnerProduct`` (``d``-dim).
         - Any explicit ``Metric`` or metric name string.
     edges_per_vertex : int, default=32
         Number of outgoing neighbors per vertex (``k_graph``).
@@ -373,8 +373,7 @@ def build(
     Returns
     -------
     DynamicExplorationGraph
-        Mutable ``SizeBoundedGraph`` when ``compress=None`` (or ``"32bit"``), or
-        compressed ``ReadOnlyGraph`` when ``compress`` is specified.
+        Mutable ``SizeBoundedGraph`` with the requested ``metric`` and ``compress`` target.
 
     See Also
     --------
@@ -566,7 +565,7 @@ def build(
             )
             graph = graph.with_features(work_data, metric=target_ip, order="internal", threads=threads)
         elif comp_key in ("16bit", "fp16", "float16"):
-            graph = graph.to_readonly().with_features(
+            graph = graph.with_features(
                 work_data, metric=Metric.FP16_InnerProduct, order="internal", threads=threads
             )
         elif comp_key in ("8bit", "auto"):
@@ -575,7 +574,7 @@ def build(
             rot = make_fast_hadamard_rotation(work_data)
             rot_data = apply_on_database(rot, work_data, threads=threads)
             quant = make_scalar_quantizer_int8(rot_data)
-            graph = graph.to_readonly().with_features(
+            graph = graph.with_features(
                 work_data,
                 metric=Metric.Int8_InnerProduct,
                 transformations=[rot, quant],
@@ -583,9 +582,21 @@ def build(
                 threads=threads,
             )
         elif comp_key == "4bit":
-            graph = compress_graph(graph, Metric.Uint4_L2, threads=threads)
+            graph = graph.with_features(
+                work_data, metric=Metric.Int4_InnerProduct, order="internal", threads=threads
+            )
+        elif comp_key in ("2bit", "evp"):
+            graph = graph.with_features(
+                work_data, metric=Metric.EVP_InnerProduct, order="internal", threads=threads
+            )
         else:
-            graph = compress_graph(graph, compress, threads=threads)
+            resolved_comp = Metric.resolve(compress)
+            if Metric(int(resolved_comp)).name.endswith("InnerProduct"):
+                graph = graph.with_features(
+                    work_data, metric=resolved_comp, order="internal", threads=threads
+                )
+            else:
+                graph = compress_graph(graph, resolved_comp, threads=threads)
     elif compress is not None:
         comp_target: Metric | str = compress
         if (

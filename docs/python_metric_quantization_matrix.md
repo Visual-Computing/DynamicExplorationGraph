@@ -15,7 +15,7 @@ This reference documents the exact internal behavior of the high-level Python AP
 
 ## 1. `deglib.presort` & `deglib.build` by High-Level Metric
 
-> **Mutability rule:** `deglib.compress(graph, target)` always preserves the backend type of `graph` (mutable stays mutable, `ReadOnlyGraph` stays `ReadOnlyGraph`). `deglib.build(...)` returns a mutable `SizeBoundedGraph` for `"l2"` / `"cosine"` and for `"ip"` with `compress=None`/`"32bit"`/`"4bit"`/`"2bit"`/explicit `L2`, and returns a `ReadOnlyGraph` for `"ip"` with `compress="16bit"`/`"8bit"`. For dynamically growing streaming graphs, use `deglib.builder.GraphBuilder` with `deglib.graph.create_dynamic_empty`.
+> **Mutability rule:** `deglib.compress(graph, target)` always preserves the backend type of `graph` (`SizeBoundedGraph` stays `SizeBoundedGraph`, `DynamicGraph` stays `DynamicGraph`, `ReadOnlyGraph` stays `ReadOnlyGraph`). `deglib.build(...)` always returns a mutable `SizeBoundedGraph` regardless of `metric` or `compress`. For dynamically growing streaming graphs, use `deglib.builder.GraphBuilder` with `deglib.graph.create_dynamic_empty`.
 
 | `metric` (aliases) | `deglib.presort(data, metric=...)` | `deglib.build` (Graph Construction) | `deglib.build` Post-Build Finalization (`compress=None`) | Rationale |
 |---|---|---|---|---|
@@ -45,10 +45,10 @@ This reference documents the exact internal behavior of the high-level Python AP
 | `"cosine"` | `"4bit"` | `Uint4_L2` | `[L2NormalizeTransform?, (FWHT), ScalarQuantizerUint4]` | `d` | `SizeBoundedGraph` |
 | `"cosine"` | `"2bit"` / `"evp"` | `EVP_InnerProduct` | `[L2Norm?, EvpQuantizer]` | `d` | `SizeBoundedGraph` |
 | **`"ip"`** | `None` / `"32bit"` | `FP32_InnerProduct` (`FP16_InnerProduct` for `float16`) | `[]` *(unnormalized)* | `d` | `SizeBoundedGraph` |
-| **`"ip"`** | `"16bit"` | `FP16_InnerProduct` | `[]` *(unnormalized)* | `d` | `ReadOnlyGraph` |
-| **`"ip"`** | `"8bit"` / `"auto"` | `Int8_InnerProduct` (`AVX512_VNNI`) | `[FastHadamardRotation, ScalarQuantizerInt8]` *(unnormalized)* | `d` | `ReadOnlyGraph` |
-| **`"ip"`** | `"4bit"` | `Uint4_L2` | `[MipsTransform, (FWHT), ScalarQuantizerUint4]` | `d + 1` | `SizeBoundedGraph` |
-| **`"ip"`** | `"2bit"` / `"evp"` | `EVP_InnerProduct` | `[MipsTransform, EvpQuantizer]` | `d + 1` | `SizeBoundedGraph` |
+| **`"ip"`** | `"16bit"` | `FP16_InnerProduct` | `[]` *(unnormalized)* | `d` | `SizeBoundedGraph` |
+| **`"ip"`** | `"8bit"` / `"auto"` | `Int8_InnerProduct` (`AVX512_VNNI`) | `[FastHadamardRotation, ScalarQuantizerInt8]` *(unnormalized)* | `d` | `SizeBoundedGraph` |
+| **`"ip"`** | `"4bit"` | `Int4_InnerProduct` | `[(FWHT), ScalarQuantizerInt4]` *(unnormalized)* | `d` | `SizeBoundedGraph` |
+| **`"ip"`** | `"2bit"` / `"evp"` | `EVP_InnerProduct` | `[EvpQuantizer]` *(unnormalized)* | `d` | `SizeBoundedGraph` |
 | **`"ip"`** | Explicit `L2` metric (e.g. `Metric.Uint7_L2`, `Metric.Int8_L2`) | Target `L2` metric | `[MipsTransform, (FWHT), ScalarQuantizer*]` | `d + 1` | `SizeBoundedGraph` |
 
 ### Empty & Pre-Quantized Edge Cases in `deglib.build`
@@ -80,8 +80,8 @@ When `compress` is provided, `deglib.searcher(graph, compress=...)` calls `degli
 | `None` / `"32bit"` | `FP32_InnerProduct` | existing | Returns `graph` unchanged if already `FP32_InnerProduct` (raises `ValueError` if `graph` is `FP16_InnerProduct`) |
 | `"16bit"` | `FP16_InnerProduct` | `[ScalarQuantizerFP16]` | Native MIPS without reranker |
 | `"8bit"` / `"auto"` | `Uint7_L2` or `Int8_InnerProduct` | `[(FWHT), ScalarQuantizer*]` | Uses `predict_quantization(graph)` (**A1+A2** via `predict_quantization_normalized(..., is_cosine=has_l2n)`) on unit-sphere `cosine`/`normalized` graphs, and `Int8_InnerProduct` on unnormalized `InnerProduct` (`ip`) graphs |
-| `"4bit"` | `Uint4_L2` | `[MipsTransform?, (FWHT), ScalarQuantizerUint4]` *(auto-prepends `MipsTransform` only when stored graph vectors are not unit-norm and have no prefix)* | Always uses `Uint4_L2` across `L2`, `cosine`/`normalized`, and `ip` |
-| `"2bit"` / `"evp"` | `EVP_InnerProduct` | `[EvpQuantizer]` | High-compression 2-bit filtering + reranking |
+| `"4bit"` | `Uint4_L2` or `Int4_InnerProduct` | `[(FWHT), ScalarQuantizer*]` | Uses `Uint4_L2` on unit-sphere `cosine`/`normalized` graphs (no `d+1` needed), and **`Int4_InnerProduct`** (`d`-dim, no `MipsTransform`) on unnormalized `InnerProduct` (`ip`) graphs |
+| `"2bit"` / `"evp"` | `EVP_InnerProduct` | `[EvpQuantizer]` | High-compression 2-bit filtering + reranking (`d`-dim, uniform without `MipsTransform` across all metrics) |
 | Explicit `L2` `Metric` (`Metric.Uint7_L2`, `Metric.Int8_L2`, `Metric.Uint4_L2`, `Metric.Uint8_L2`) | Target `L2` metric | `[MipsTransform?, (FWHT), ScalarQuantizer*]` *(auto-prepends `MipsTransform` via `mips=True` only when stored graph vectors are not unit-norm and have no prefix)* | Enables `L2` quantizers directly on `InnerProduct` graphs without adding `d+1` overhead on unit-norm `cosine`/`normalized` graphs |
 
 ### 3.3 8-Bit Quantizer Predictor Rules (`K5-Top` vs. `A1+A2`)
@@ -92,6 +92,27 @@ For `compress="8bit"` / `"auto"`, the target quantizer (`Uint7_L2` vs. `Int8_Inn
 3. **`"cosine"` / `"normalized"` (unit-sphere `InnerProduct`):**
    - **`K5-Top`** (`predict_quantization(data, ...)`): Used in **`deglib.build`** and **`deglib.reranker_with_data`** when raw unnormalized `data` is available (relies on raw norms via `log1p_mips_extra_ratio` and raw covariance via `top32_var_ratio`).
    - **`A1+A2`** (`predict_quantization(graph, ...)` / `predict_quantization_normalized(data, is_cosine, ...)`): Used in **`deglib.compress`**, **`deglib.searcher(..., compress="8bit")`**, and **`deglib.reranker(..., compress="8bit")`** when only already-normalized 32-bit graph vectors remain (100% L2-normalization-invariant; `is_cosine` is preserved from `L2NormalizeTransform`).
+
+### 3.4 Why Unnormalized `IP` Uses `Int4_InnerProduct` & `EVP_InnerProduct` Without `MipsTransform` (`d + 1`)
+
+Empirical benchmark on both VIBE unnormalized IP datasets (`yi` 187,843 × 128D and `llama` 256,921 × 128D, `128D_FP32_InnerProduct_K16_AddK32Eps0.1_LowLID_FLAS.deg`, `k=10`, `threads=1`, `16-bit` reranker):
+
+| Metric | `MipsTransform` (`d+1`) | `yi` (`ef=200, rr=2.0`) Recall / QPS | `llama` (`ef=200, rr=2.0`) Recall / QPS | Notes |
+|---|---|---|---|---|
+| `Int4_InnerProduct` | No (`128D`) | `0.3119` / `11,657` | **`0.1348`** / `9,774` | **Best 4-bit IP choice** — beats `Uint4_L2 + MIPS` in recall (+2.2x on `llama`) and QPS, and avoids `d+1` alignment overhead |
+| `Int4_InnerProduct` | Yes (`129D`) | `0.3160` / `10,875` | `0.0928` / `9,780` | Worse on `llama` and slower due to `d+1` |
+| `Uint4_L2` | Yes (`129D`) | `0.2615` / `11,086` | `0.0605` / `10,647` | Lower recall than `Int4_InnerProduct` (and collapses to ~28–60 QPS under `eps=0.1`) |
+| `Uint4_L2` / `Int4_L2` | No (`128D`) | `0.0415` / `0.0349` | `0.0000` / `0.0000` | L2 without `MipsTransform` cannot order unnormalized IP norms |
+| `Int4_L2` | Yes (`129D`) | `0.2271` / `9,605` | `0.0645` / `9,470` | Strictly worse than `Uint4_L2 + MIPS` and `Int4_InnerProduct` |
+| `Uint4_InnerProduct` | Yes / No | `0.0184` / `0.0004` | `0.0039` / `0.0001` | Unsigned 4-bit IP does not preserve signed inner-product ordering |
+| `EVP_InnerProduct` | No (`128D`) | `0.0346` / `13,875` | `0.0003` / `13,061` | Kept `d`-dim (without `MipsTransform`) for uniformity with `Int4_InnerProduct` and `Int8_InnerProduct` |
+| `EVP_InnerProduct` | Yes (`129D`) | `0.0485` / `12,262` | `0.0012` / `12,319` | Negligible recall on unnormalized IP, lower QPS |
+
+**Rules derived from this benchmark:**
+- Never use `Uint4_InnerProduct` for unnormalized IP.
+- Never use `Uint4_L2` or `Int4_L2` on unnormalized IP without `MipsTransform` (`d+1`).
+- For `compress="4bit"` on unnormalized IP (`deglib.build(..., metric="ip")` and `deglib.compress` / `deglib.searcher`), always use **`Int4_InnerProduct`** in **`d` dimensions** (no `MipsTransform`).
+- For `compress="2bit"` / `"evp"` on `metric="ip"`, always swap back to **`EVP_InnerProduct`** in **`d` dimensions** (no `MipsTransform`) for uniform `d`-dim behavior across all `InnerProduct` compressions (`32bit`, `16bit`, `8bit`, `4bit`, `2bit`).
 
 ---
 

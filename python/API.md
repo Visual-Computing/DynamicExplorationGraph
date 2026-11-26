@@ -15,7 +15,7 @@ The `deglib` package separates its **High-Level API** (re-exported directly at t
 | **Transformations & Quantizers** | `deglib.transformation.*` | `FeatureTransformation`, `TransformationType`, `make_quantizer_pipeline`, `make_mips_transform`, `make_l2_normalize_transform`, `make_fast_hadamard_rotation`, `make_evp_quantizer`, `make_scalar_quantizer_*`, `apply_on_database`, `apply_on_query` |
 | **Optimization & Pruning** | `deglib.optimization.*` | `prune_non_mrng_edges`, `prune_worst_edges` |
 | **Distances & CPU ISA** | `deglib.distances.*`, `deglib.cpu.*` | `floats_to_fp16`, `fp16_to_floats`, `InstructionSet`, `has_avx2`, `has_avx2_vnni`, `has_avx512`, `has_avx512_vnni`, `has_avx512_fp16`, `has_fp16` |
-| **Analysis & Tuning** | `deglib.analysis.*`, `deglib.tuning.*` | `analyze_graph`, `GraphStats`, `calc_graph_quality`, `DatasetProfile`, `measure_dataset_profile`, `predict_optimization_target`, `predict_quantization` |
+| **Analysis & Tuning** | `deglib.analysis.*`, `deglib.tuning.*` | `analyze_graph`, `GraphStats`, `calc_graph_quality`, `DatasetProfile`, `measure_dataset_profile`, `predict_optimization_target`, `predict_quantization`, `predict_quantization_normalized` |
 
 ---
 
@@ -91,8 +91,8 @@ indices = searcher.search(queries, k=10, eps_or_ef=64, rerank_factor=2.0, unsort
 ```python
 import deglib
 
-# Automatically lifts into MIPS(d+1) for presort/build and swaps back to d-dim InnerProduct (or 16bit/8bit/4bit)
-ro_graph = deglib.build(
+# Automatically lifts into MIPS(d+1) for presort/build and swaps back to d-dim InnerProduct (for compress=None/32bit/16bit/8bit/4bit/2bit)
+ip_graph = deglib.build(
     train_vectors,
     metric="ip",
     compress="16bit",
@@ -101,7 +101,7 @@ ro_graph = deglib.build(
     presort=True,
     threads=8,
 )
-res = ro_graph.search(query, eps_or_ef=0.18, k=10)
+res = ip_graph.search(query, eps_or_ef=0.18, k=10)
 indices, distances = res.indices, res.distances
 ```
 
@@ -133,27 +133,169 @@ deglib.build(
 ) -> DynamicExplorationGraph
 ```
 
-Builds a graph from a 2D NumPy array:
-- **`metric`**: High-level spatial modes (`"l2"` / `"euclidean"`, `"cosine"` / `"normalized"`, `"ip"`) or an explicit `Metric`. `"cosine"` attaches `L2NormalizeTransform` if vectors are not unit-norm; `"ip"` builds in `MipsTransform (d+1)` space and swaps stored features back to unnormalized `d`-dim `InnerProduct` (or `compress` target).
-- **`compress`**: Optional post-build quantization (`"32bit"`, `"16bit"`, `"8bit"`, `"4bit"`, `"2bit"`, `"auto"`, or an explicit `Metric`). Preserves mutability via `deglib.compress` for `"l2"` / `"cosine"`, while `"ip"` `"16bit"`/`"8bit"` swaps to a compact `ReadOnlyGraph`.
-- **`presort`**: `True` runs 1D FLAS pre-sorting via `deglib.presort` and reorders data + labels together; an `np.ndarray` uses precomputed sorted indices; `False` keeps insertion order.
-- **`optimize`**: Runs `graph.optimize()` after building when `True` (default).
+Builds and optionally optimizes/compresses a `DynamicExplorationGraph` from a 2D NumPy feature matrix.
+
+**Parameters:**
+- **`data`**: 2D feature matrix of shape `(N, dim)`. Supports `float32` and `float16` for high-level metrics and `compress`, or pre-quantized dtypes (e.g. `int8`, `uint8`) when an explicit quantized `Metric` is passed.
+- **`labels`**: Optional 1D sequence or `np.ndarray` of external `uint32` vertex IDs of length `N`. Defaults to `0 .. N - 1`.
+- **`metric`**: High-level spatial mode (`"l2"` / `"euclidean"`, `"cosine"` / `"normalized"`, `"ip"` / `"innerproduct"` / `"inner_product"` / `"mips"`) or an explicit `Metric` / metric string (e.g. `Metric.Int8_L2`, `"Uint7_L2"`).
+  - `"cosine"` attaches `L2NormalizeTransform` if vectors are not already unit-norm.
+  - `"ip"` builds in `MipsTransform (d + 1) + L2` space and swaps stored features back to unnormalized `d`-dim `InnerProduct` (or the `compress` target).
+- **`compress`**: Optional post-build quantization target (`"32bit"` / `"fp32"` / `"float32"`, `"16bit"` / `"fp16"` / `"float16"`, `"8bit"`, `"4bit"`, `"2bit"` / `"evp"`, `"auto"`, or an explicit `Metric` / metric string). Preserves mutability (`SizeBoundedGraph`) across all metrics and compression targets.
+- **`edges_per_vertex`**: Number of outgoing neighbors per vertex (`k_graph`).
+- **`optimization_target`**: Graph construction strategy (`OptimizationTarget.Auto`, `OptimizationTarget.LowLID`, `OptimizationTarget.HighLID`, `OptimizationTarget.StreamingData`, or string equivalents). `Auto` predicts `LowLID` vs. `StreamingData` from dataset geometry.
+- **`extend_k`**: Candidate pool size during neighbor extension (`0` uses the builder default `2 * edges_per_vertex`).
+- **`extend_eps`**: Exploration tolerance `eps` during neighbor extension.
+- **`improve_k`**: Candidate pool size during edge improvement (`0` defaults to `edges_per_vertex` in `GraphBuilder`).
+- **`improve_eps`**: Exploration tolerance `eps` during edge improvement.
+- **`max_path_length`**: Maximum path length considered during RNG edge pruning/improvement.
+- **`improve_tries`**: Number of improvement passes per step.
+- **`seed`**: Random seed used during graph construction.
+- **`presort`**: `True` runs 1D FLAS pre-sorting via `deglib.presort` and reorders `data` and `labels` together; a 1D `uint32` `np.ndarray` applies precomputed sorted indices; `False` keeps insertion order.
+- **`optimize`**: Runs `graph.optimize()` (prefetch & entry-point tuning) after building when `True`.
+- **`threads`**: Worker thread count (`0` uses all available CPU cores).
+- **`show_progress`**: Whether to print a live progress bar on stdout (`None` defaults to `sys.stdout.isatty()`).
+
+**Returns:** Mutable `SizeBoundedGraph` (`DynamicExplorationGraph`) with the requested `metric` and `compress` target.
+
+---
+
+### `deglib.presort`
+
+```python
+deglib.presort(
+    vectors: np.ndarray,
+    metric: Metric | str = Metric.FP32_L2,
+    radius_decay: float = 0.9,
+    threads: int = 0,
+    callback: Callable[[float], bool | None] | None = None,
+    show_progress: bool = False,
+) -> np.ndarray
+```
+
+Runs 1D FLAS spatial pre-sorting on dataset vectors (automatically lifting `"ip"` into MIPS space).
+
+**Parameters:**
+- **`vectors`**: 2D `float32` or `float16` NumPy array of shape `(N, dim)`.
+- **`metric`**: High-level metric string (`"l2"`, `"euclidean"`, `"cosine"`, `"normalized"`, `"ip"`, `"mips"`, etc.) or explicit FP32/FP16 `Metric`.
+- **`radius_decay`**: Neighborhood radius decay rate per FLAS iteration in `(0, 1)`.
+- **`threads`**: Worker thread count (`0` uses all CPU cores).
+- **`callback`**: Optional progress callback receiving progress in `[0.0, 1.0]`; returning `True` cancels sorting.
+- **`show_progress`**: If `True`, prints a live progress bar to stdout.
+
+**Returns:** 1D `uint32` `np.ndarray` of permutation indices of length `N`.
+
+---
+
+### `deglib.compress`
+
+```python
+deglib.compress(
+    graph: DynamicExplorationGraph,
+    target: Literal["32bit", "16bit", "8bit", "4bit", "2bit", "auto"] | Metric | str,
+    threads: int = 0,
+) -> DynamicExplorationGraph
+```
+
+Compresses an uncompressed (`FP32` or `FP16`) graph to the requested bit-width or `Metric`, preserving the input graph's backend type, topology, and external labels.
+
+**Parameters:**
+- **`graph`**: Source `DynamicExplorationGraph` (`FP32` or `FP16`, unless `target="32bit"` on an existing `FP32` graph).
+- **`target`**: Target precision or metric:
+  - `"32bit"` / `"fp32"` / `"float32"`: `FP32_L2` or `FP32_InnerProduct` matching the graph's distance kind.
+  - `"16bit"` / `"fp16"` / `"float16"`: `FP16_L2` or `FP16_InnerProduct`.
+  - `"8bit"` / `"auto"`: `Uint7_L2` on L2 graphs, `deglib.tuning.predict_quantization` (`Uint7_L2` vs. `Int8_InnerProduct`) on unit-sphere `cosine`/`normalized` graphs, and `Int8_InnerProduct` on unnormalized `InnerProduct` graphs.
+  - `"4bit"`: `Uint4_L2` on L2 and `cosine`/`normalized` graphs; `Int4_InnerProduct` on unnormalized `InnerProduct` graphs (no `d+1` `MipsTransform` overhead).
+  - `"2bit"` / `"evp"`: `EVP_InnerProduct`.
+  - Any explicit `Metric` or metric name string (e.g. `Metric.Int8_L2`, `"Uint8_L2"`).
 - **`threads`**: Worker thread count (`0` uses all CPU cores).
 
-### `deglib.presort`, `deglib.compress`, `deglib.reranker`, `deglib.reranker_with_data`, `deglib.searcher`
+**Returns:** Compressed `DynamicExplorationGraph` with the same backend type as `graph`.
 
-- `deglib.presort(vectors, metric="l2", radius_decay=0.9, threads=0, callback=None, show_progress=False) -> np.ndarray`: Runs 1D FLAS pre-sorting (handles `"ip"` MIPS lifting automatically).
-- `deglib.compress(graph, target, threads=0) -> DynamicExplorationGraph`: Compresses a float graph (`"32bit"`, `"16bit"`, `"8bit"`, `"4bit"`, `"2bit"`, `"auto"`, or `Metric`), preserving the input graph's backend type. For `"8bit"` / `"auto"`, selects `Uint7_L2` on L2 graphs, `deglib.tuning.predict_quantization` (`Uint7_L2` vs. `Int8_InnerProduct`) on unit-sphere `cosine`/`normalized` graphs, and `Int8_InnerProduct` on unnormalized `InnerProduct` graphs. For `"4bit"`, always selects `Uint4_L2` (auto-prepending `MipsTransform` on unnormalized `InnerProduct` graphs).
-- `deglib.reranker(graph, compress="16bit", optimize=True, threads=0) -> Reranker`: Extracts a `Reranker` from a float graph's stored vectors.
-- `deglib.reranker_with_data(graph, data, metric="16bit", optimize=True, threads=0) -> Reranker`: Builds a `Reranker` from external feature vectors aligned with `graph` labels.
-- `deglib.searcher(graph, compress=None, reranker=None, optimize=True, threads=0) -> Searcher`: Wraps `graph` (optionally compressing first) in an optimized `ReadOnlyGraph`-backed `Searcher`.
-  - **Memory & Ownership:** When `graph` is already a `ReadOnlyGraph` and `compress=None`, `searcher.graph` shares `graph` zero-copy (`searcher.graph is graph`). When `graph` is mutable or `compress` is set, a new `ReadOnlyGraph` is allocated for `searcher.graph` (drop `graph` if you no longer need the mutable/uncompressed copy in RAM).
+---
+
+### `deglib.reranker`
+
+```python
+deglib.reranker(
+    graph: DynamicExplorationGraph,
+    compress: Literal["16bit", "8bit"] | Metric | str | None = "16bit",
+    optimize: bool = True,
+    threads: int = 0,
+) -> Reranker
+```
+
+Extracts a standalone `Reranker` directly from an uncompressed (`FP32` or `FP16`) `graph`'s stored vectors (raises `ValueError` if `graph` is already quantized; use `deglib.reranker_with_data` instead).
+
+**Parameters:**
+- **`graph`**: Backing uncompressed `DynamicExplorationGraph`.
+- **`compress`**: Target reranker precision (`"16bit"`, `"8bit"` / `"auto"`, `"32bit"` / `None`, `"int8"`, `"uint8"`, `"uint7"`, or an explicit `Metric`).
+- **`optimize`**: If `True`, runs `reranker.optimize()` to tune candidate prefetching.
+- **`threads`**: Worker thread count (`0` uses all CPU cores).
+
+**Returns:** `Reranker` aligned with `graph.get_labels()`.
+
+---
+
+### `deglib.reranker_with_data`
+
+```python
+deglib.reranker_with_data(
+    graph: DynamicExplorationGraph,
+    data: np.ndarray,
+    labels: Sequence[int] | np.ndarray | None = None,
+    compress: Literal["16bit", "8bit"] | Metric | str | None = "16bit",
+    metric: Literal["l2", "cosine", "ip"] | Metric | str | None = None,
+    optimize: bool = True,
+    threads: int = 0,
+) -> Reranker
+```
+
+Creates a `Reranker` from external `data` aligned with `graph` (supports quantized and presorted graphs while preserving any `L2NormalizeTransform` / `MipsTransform` prefix attached to `graph`).
+
+**Parameters:**
+- **`graph`**: Target `DynamicExplorationGraph` whose internal vertex order (`graph.get_labels()`) the reranker aligns to.
+- **`data`**: 2D `float32` or `float16` feature matrix.
+- **`labels`**: Optional external labels corresponding to rows of `data`. Defaults to `0 .. len(data) - 1`.
+- **`compress`**: Target reranker precision (`"16bit"`, `"8bit"` / `"auto"`, `"32bit"`, `None`, or explicit `Metric`).
+- **`metric`**: Optional distance kind override (`"l2"` / `"euclidean"`, `"cosine"`, `"ip"` / `"innerproduct"` / `"mips"`, or explicit `Metric`). Defaults to `graph.get_metric()`.
+- **`optimize`**: If `True`, runs `reranker.optimize()` to tune candidate prefetching.
+- **`threads`**: Worker thread count (`0` uses all CPU cores).
+
+**Returns:** `Reranker` aligned with `graph.get_labels()`.
+
+---
+
+### `deglib.searcher`
+
+```python
+deglib.searcher(
+    graph: DynamicExplorationGraph,
+    compress: Literal["32bit", "16bit", "8bit", "4bit", "2bit", "auto"] | Metric | str | None = None,
+    reranker: Reranker | None = None,
+    optimize: bool = True,
+    threads: int = 0,
+) -> Searcher
+```
+
+Wraps `graph` (optionally compressing first via `deglib.compress`) in an optimized `ReadOnlyGraph`-backed `Searcher`.
+
+> **Memory & Ownership:** When `graph` is already a `ReadOnlyGraph` and `compress=None`, `searcher.graph` shares `graph` zero-copy (`searcher.graph is graph`). When `graph` is mutable or `compress` is set, a new `ReadOnlyGraph` is allocated for `searcher.graph` (drop `graph` if you no longer need the mutable/uncompressed copy in RAM).
+
+**Parameters:**
+- **`graph`**: Backing `DynamicExplorationGraph`.
+- **`compress`**: Optional compression target (`"32bit"`, `"16bit"`, `"8bit"`, `"4bit"`, `"2bit"`, `"auto"`, `Metric`, or `None` to use `graph` as-is).
+- **`reranker`**: Optional prebuilt `Reranker` for two-stage candidate re-scoring.
+- **`optimize`**: If `True`, runs `searcher.optimize(threads=threads)` (K-Means routing entry points and prefetch tuning).
+- **`threads`**: Worker thread count for compression and optimization (`0` uses all CPU cores).
+
+**Returns:** `Searcher` ready for `searcher.search(...)`.
 
 ---
 
 ## 2. Metrics & CPU Instruction Sets (`deglib.distances`, `deglib.cpu`)
 
-`deglib.Metric` directly encapsulates distance function, vector dtype/byte-size calculations, distance evaluation helpers, and optional SIMD `InstructionSet` bindings. `FloatSpace` is internal and not exposed in the public API.
+`deglib.Metric` encapsulates distance functions, vector dtype/byte-size calculations, distance evaluation helpers, and optional SIMD `InstructionSet` bindings. `FloatSpace` is internal and not exposed in the public API.
 
 ### `Metric` (`IntEnum`)
 
@@ -162,33 +304,72 @@ Supported metric members:
 - **FP16**: `Metric.FP16_L2`, `Metric.FP16_InnerProduct` (`np.float16` or raw `np.uint16` bit representation)
 - **UINT8**: `Metric.Uint8_L2`, `Metric.Uint8_InnerProduct` (`np.uint8`)
 - **INT8**: `Metric.Int8_L2`, `Metric.Int8_InnerProduct` (`np.int8`)
-- **UINT7**: `Metric.UInt7_L2`, `Metric.UInt7_InnerProduct` (`np.int8`, values in `[0, 127]`)
+- **UINT7**: `Metric.Uint7_L2`, `Metric.Uint7_InnerProduct` (`np.int8`, values in `[0, 127]`)
 - **INT4**: `Metric.Int4_L2`, `Metric.Int4_InnerProduct` (`np.uint8`, packed 2 values/byte)
 - **UINT4**: `Metric.Uint4_L2`, `Metric.Uint4_InnerProduct` (`np.uint8`, packed 2 values/byte)
 - **EVP**: `Metric.EVP_InnerProduct` (`np.uint8`, packed bitmasks of size `2 * ((dim + 7) // 8)`)
 
-Methods on `Metric` (usable both on `Metric.*` enum members and bound metrics returned by `with_instruction` / `graph.get_metric()`):
+#### `Metric.resolve`
 
-- `Metric.resolve(metric: Metric | str | int, distance_kind: str | None = None, instruction: InstructionSet | str | None = None) -> Metric`
-- `metric.with_instruction(instruction: InstructionSet | str) -> Metric`: Returns a metric bound to a specific `InstructionSet` (compares `==` to the base `Metric` enum member).
-- `metric.get_instruction(dim: int = 16) -> InstructionSet`: Returns the bound or auto-resolved CPU instruction set.
-- `metric.get_dtype() -> np.dtype`: Canonical storage dtype for features.
-- `metric.get_accepted_dtypes() -> tuple[np.dtype, ...]`: Accepted array dtypes (e.g., `(np.uint16, np.float16)` for FP16).
-- `metric.get_data_size(dim: int) -> int`: Stored byte size per database vector of dimension `dim`.
-- `metric.get_query_data_size(dim: int) -> int`: Query byte size per vector of dimension `dim`.
-- `metric.compute_distance(vec1: np.ndarray, vec2: np.ndarray) -> float`: Compute distance between two 1D vectors.
-- `metric.compute_distances(query: np.ndarray, targets: np.ndarray, threads: int = 0) -> np.ndarray`: Compute distances between 1D/2D `query` and 2D `targets` (returns shape `(n_queries, n_targets)`).
+```python
+Metric.resolve(
+    metric: Metric | str | int,
+    distance_kind: str | None = None,
+    instruction: InstructionSet | str | None = None,
+) -> Metric
+```
+
+Resolves a `Metric` from an enum member, integer value, or case-insensitive name/parts (e.g. `Metric.resolve("int8", "ip", instruction="AVX2")`).
+
+#### `Metric` Instance Methods
+
+```python
+metric.with_instruction(instruction: InstructionSet | str) -> Metric
+metric.get_instruction(dim: int = 16) -> InstructionSet
+metric.get_dtype() -> np.dtype
+metric.get_accepted_dtypes() -> tuple[np.dtype, ...]
+metric.get_data_size(dim: int) -> int
+metric.get_query_data_size(dim: int) -> int
+metric.compute_distance(vec1: np.ndarray, vec2: np.ndarray) -> float
+metric.compute_distances(query: np.ndarray, targets: np.ndarray, threads: int = 0) -> np.ndarray
+```
+
+- **`with_instruction`**: Returns a `Metric` handle bound to a specific `InstructionSet` (compares `==` to the base `Metric` enum member).
+- **`get_instruction`**: Returns the bound or auto-resolved CPU `InstructionSet` for dimension `dim`.
+- **`get_dtype`**: Canonical NumPy storage dtype for stored features.
+- **`get_accepted_dtypes`**: All directly accepted NumPy dtypes (e.g. `(np.uint16, np.float16)` for FP16).
+- **`get_data_size` / `get_query_data_size`**: Byte size of one stored/query vector of dimension `dim`.
+- **`compute_distance`**: Computes distance between two 1D vectors (`vec1`, `vec2`).
+- **`compute_distances`**: Computes pairwise distances between 1D/2D `query` and 2D `targets` (returns `(n_queries, n_targets)`).
+
+---
 
 ### `InstructionSet` (`IntEnum`) & CPU Helpers (`deglib.cpu`)
 
-- Members: `InstructionSet.Auto`, `InstructionSet.Scalar`, `InstructionSet.AVX2`, `InstructionSet.AVX2_VNNI`, `InstructionSet.AVX512`, `InstructionSet.AVX512_VNNI`, `InstructionSet.AVX512_FP16`.
-- `InstructionSet.resolve(instruction: InstructionSet | str | int) -> InstructionSet`
-- Capability checks: `has_avx2()`, `has_avx2_vnni()`, `has_avx512()`, `has_avx512_vnni()`, `has_avx512_fp16()`, `has_fp16()`
+Members: `InstructionSet.Auto`, `InstructionSet.Scalar`, `InstructionSet.AVX2`, `InstructionSet.AVX2_VNNI`, `InstructionSet.AVX512`, `InstructionSet.AVX512_VNNI`.
+
+```python
+InstructionSet.resolve(instruction: InstructionSet | str | int) -> InstructionSet
+
+has_avx2() -> bool
+has_avx2_vnni() -> bool
+has_avx512() -> bool
+has_avx512_vnni() -> bool
+has_avx512_fp16() -> bool
+has_fp16() -> bool
+```
+
+---
 
 ### FP16 Conversion Helpers (`deglib.distances`)
 
-- `floats_to_fp16(floats: np.ndarray) -> np.ndarray`: Converts `float32` array to IEEE-754 half-precision `uint16` buffer.
-- `fp16_to_floats(fp16_vals: np.ndarray) -> np.ndarray`: Converts `uint16` FP16 buffer back to `float32`.
+```python
+floats_to_fp16(floats: np.ndarray) -> np.ndarray
+fp16_to_floats(fp16_vals: np.ndarray) -> np.ndarray
+```
+
+- **`floats_to_fp16`**: Converts a `float32` array to IEEE-754 half-precision `uint16` bit-patterns.
+- **`fp16_to_floats`**: Converts a `uint16` FP16 bit-pattern array back to `float32`.
 
 ---
 
@@ -198,59 +379,226 @@ All graphs (fixed-capacity mutable `SizeBoundedGraph`, chunked `DynamicGraph`, a
 
 ### Factory & Loader Functions
 
-- `create_empty(capacity: int, dim: int, edges_per_vertex: int = 32, metric: Metric | str = Metric.FP32_L2, transformations: FeatureTransformation | Sequence[FeatureTransformation] | None = None) -> DynamicExplorationGraph`
-- `create_dynamic_empty(dim: int, edges_per_vertex: int = 32, metric: Metric | str = Metric.FP32_L2, chunk_size: int = 1024, transformations: FeatureTransformation | Sequence[FeatureTransformation] | None = None) -> DynamicExplorationGraph`
-- `create_random_graph(features: np.ndarray, edges_per_vertex: int = 32, metric: Metric | str = Metric.FP32_L2, seed: int = 7, optimize: bool = True, transformations: FeatureTransformation | Sequence[FeatureTransformation] | None = None) -> DynamicExplorationGraph`
-- `load_graph(path: Path | str) -> DynamicExplorationGraph`: High-level loader (loads as read-only).
-- `load_readonly_graph(path: Path | str) -> DynamicExplorationGraph`
-- `load_mutable_graph(path: Path | str, capacity: int = 0) -> DynamicExplorationGraph`
-- `load_dynamic_graph(path: Path | str, chunk_size: int = 1024) -> DynamicExplorationGraph`
+```python
+create_empty(
+    capacity: int,
+    dim: int,
+    edges_per_vertex: int = 32,
+    metric: Metric | str = Metric.FP32_L2,
+    transformations: FeatureTransformation | Sequence[FeatureTransformation] | None = None,
+) -> DynamicExplorationGraph
+
+create_dynamic_empty(
+    dim: int,
+    edges_per_vertex: int = 32,
+    metric: Metric | str = Metric.FP32_L2,
+    chunk_size: int = 1024,
+    transformations: FeatureTransformation | Sequence[FeatureTransformation] | None = None,
+) -> DynamicExplorationGraph
+
+create_random_graph(
+    features: np.ndarray,
+    edges_per_vertex: int = 32,
+    metric: Metric | str = Metric.FP32_L2,
+    seed: int = 7,
+    optimize: bool = True,
+    transformations: FeatureTransformation | Sequence[FeatureTransformation] | None = None,
+) -> DynamicExplorationGraph
+
+load_graph(path: Path | str) -> DynamicExplorationGraph
+load_readonly_graph(path: Path | str) -> DynamicExplorationGraph
+load_mutable_graph(path: Path | str, capacity: int = 0) -> DynamicExplorationGraph
+load_dynamic_graph(path: Path | str, chunk_size: int = 1024) -> DynamicExplorationGraph
+```
+
+- **`create_empty`**: Creates an empty fixed-capacity mutable `SizeBoundedGraph`.
+- **`create_dynamic_empty`**: Creates an empty chunk-allocated mutable `DynamicGraph`.
+- **`create_random_graph`**: Creates a random `k`-regular graph directly from a 2D `features` array (running `graph.optimize()` when `optimize=True`).
+- **`load_graph` / `load_readonly_graph`**: Loads a `.deg` graph from disk as an immutable `ReadOnlyGraph`.
+- **`load_mutable_graph`**: Loads a `.deg` graph as a fixed-capacity `SizeBoundedGraph` (`capacity=0` uses the saved vertex count).
+- **`load_dynamic_graph`**: Loads a `.deg` graph as a chunked `DynamicGraph`.
+
+---
 
 ### `DynamicExplorationGraph` Methods
 
-#### Introspection & Topology
-- `size() -> int`
-- `get_dim() -> int`
-- `get_metric() -> Metric`: Returns metric bound to the graph's `InstructionSet` (use `==` when comparing to `Metric.*`).
-- `get_instruction() -> InstructionSet`
-- `get_data_size() -> int`
-- `get_edges_per_vertex() -> int`
-- `is_mutable() -> bool`
-- `has_vertex(external_label: int) -> bool`
-- `get_labels() -> np.ndarray`: External labels ordered by internal graph slot (`0 .. size()-1`).
-- `get_neighbors(external_label: int | np.ndarray | Sequence[int], threads: int = 1) -> list[int] | np.ndarray`
-- `get_po() -> int`, `get_pl() -> int`, `get_nl() -> int`
-- `has_path(from_external_labels: Sequence[int], to_external_label: int, eps_or_ef: float = 0.0, max_distance_computation_count: int = 0) -> list[ObjectDistance]`
-- `save_graph(path: Path | str) -> bool` (requires mutable graph)
-- `optimize(sample_count: int = 300, median_subset: int = 4096) -> None`
-- `to_recall_table(k: int, mode: Literal["ef", "eps"], sample_count: int = 300, recall_range: tuple[float, float] | None = None, recall_step: float | None = None, target_recalls: Sequence[float] | np.ndarray | None = None, threads: int = 0) -> RecallTable`: Calibrates a single-mode recall@k parameter curve (`ef ∈ [10, 500]` step `1`, or `eps ∈ [0.001, 0.20]` resolution `0.0001`), picking the smallest parameter achieving `measured_recall >= target_recall` using self-sampled queries, exact ground truth, and an approximated brute-force time guard (defaults `recall_range=(0.80, 0.999)`, `recall_step=0.005`).
-- `to_recall_tables(k: int, sample_count: int = 300, recall_range: tuple[float, float] | None = None, recall_step: float | None = None, target_recalls: Sequence[float] | np.ndarray | None = None, threads: int = 0) -> list[RecallTable]`: Calibrates both `"ef"` and `"eps"` `RecallTable` curves in one pass sharing exact ground truth.
-- `to_pareto_line(k: int | None = None, recall_tables: RecallTable | Sequence[RecallTable] | None = None, sample_count: int | None = None, recall_range: tuple[float, float] | None = None, recall_step: float | None = None, target_recalls: Sequence[float] | np.ndarray | None = None, threads: int = 0, rounds: int = 3) -> ParetoLine`: Unifies measured operating points across `recall_tables` (defaulting to `to_recall_tables(k, ...)`) by single-threaded median latency in `(measured_recall, latency_us)` space, prunes Pareto-dominated points, and exposes `.recall_tables`.
+#### Introspection, Persistence & Calibration
+
+```python
+graph.size() -> int
+graph.get_dim() -> int
+graph.get_metric() -> Metric
+graph.get_instruction() -> InstructionSet
+graph.get_data_size() -> int
+graph.get_edges_per_vertex() -> int
+graph.is_mutable() -> bool
+graph.has_vertex(external_label: int) -> bool
+graph.get_labels() -> np.ndarray
+graph.get_neighbors(external_label: int | np.ndarray | Sequence[int], threads: int = 1) -> list[int] | np.ndarray
+graph.get_po() -> int
+graph.get_pl() -> int
+graph.get_nl() -> int
+graph.has_transformations() -> bool
+graph.get_transformations() -> list[FeatureTransformation]
+graph.set_transformations(transformations: FeatureTransformation | Sequence[FeatureTransformation] | None) -> None
+graph.get_entry_vertex_indices() -> list[int]
+graph.set_entry_vertex_indices(indices: Sequence[int] | np.ndarray) -> None
+graph.save_graph(path: Path | str) -> None
+graph.optimize(sample_count: int = 300, median_subset: int = 4096) -> None
+```
+
+- **`get_metric()`**: Returns the active `Metric` bound to the graph's `InstructionSet` (use `==` when comparing to `Metric.*`).
+- **`get_labels()`**: 1D `uint32` array of external labels ordered by internal vertex slot (`0 .. size() - 1`).
+- **`get_neighbors(external_label, threads=1)`**: Returns `list[int]` for a single label, or a 2D `uint32` array of shape `(len(external_label), edges_per_vertex)` for a batch.
+- **`get_po()`, `get_pl()`, `get_nl()`**: Traversal prefetch offset, feature prefetch look-ahead (cache lines, `0` = whole vector), and neighbor prefetch look-ahead.
+- **`save_graph(path)`**: Saves topology, features, transformations, and prefetch config to `.deg` format (auto-converts read-only graphs if needed).
+- **`optimize(sample_count=300, median_subset=4096)`**: Auto-tunes traversal prefetch parameters (`po`, `pl`, `nl`) and the graph-median entry point.
+
+```python
+graph.has_path(
+    from_external_labels: int | np.ndarray | Sequence[int],
+    to_external_label: int,
+    eps: float = 0.0,
+    k: int = 1,
+    return_distances: bool = True,
+) -> tuple[np.ndarray, np.ndarray] | np.ndarray
+```
+
+Checks reachability via greedy traversal from `from_external_labels` to `to_external_label`.
+
+```python
+graph.to_recall_table(
+    k: int,
+    mode: Literal["ef", "eps"],
+    sample_count: int = 300,
+    recall_range: tuple[float, float] | None = None,
+    recall_step: float | None = None,
+    target_recalls: Sequence[float] | np.ndarray | None = None,
+    threads: int = 0,
+) -> RecallTable
+
+graph.to_recall_tables(
+    k: int,
+    sample_count: int = 300,
+    recall_range: tuple[float, float] | None = None,
+    recall_step: float | None = None,
+    target_recalls: Sequence[float] | np.ndarray | None = None,
+    threads: int = 0,
+) -> list[RecallTable]
+
+graph.to_pareto_line(
+    k: int | None = None,
+    recall_tables: RecallTable | Sequence[RecallTable] | None = None,
+    sample_count: int | None = None,
+    recall_range: tuple[float, float] | None = None,
+    recall_step: float | None = None,
+    target_recalls: Sequence[float] | np.ndarray | None = None,
+    threads: int = 0,
+    rounds: int = 3,
+) -> ParetoLine
+```
+
+- **`to_recall_table`**: Calibrates a single-mode recall@k parameter curve (`ef ∈ [10, 500]` step `1`, or `eps ∈ [0.001, 0.20]` resolution `0.0001`), picking the smallest parameter achieving `measured_recall >= target_recall` using self-sampled queries and exact ground truth (defaults `recall_range=(0.80, 0.999)`, `recall_step=0.005`).
+- **`to_recall_tables`**: Calibrates both `"ef"` and `"eps"` `RecallTable` curves in one pass sharing exact ground truth.
+- **`to_pareto_line`**: Unifies measured operating points across `recall_tables` (defaulting to `to_recall_tables(k, ...)`) by single-threaded median latency in `(measured_recall, latency_us)` space, prunes Pareto-dominated points, and exposes `.recall_tables`.
+
+---
 
 #### Graph Conversion & Searcher Construction
-- `to_readonly() -> DynamicExplorationGraph`: Pure backend copy to `ReadOnlyGraph` (preserves features, metric, and `transformations_`).
-- `to_mutable(max_size: int = 0, threads: int = 0) -> DynamicExplorationGraph`: Pure backend copy to `SizeBoundedGraph` (preserves features, metric, and `transformations_`; uses `threads` for edge-weight recomputation when converting from a `ReadOnlyGraph`).
-- `to_dynamic(chunk_size: int = 1024, threads: int = 0) -> DynamicExplorationGraph`: Pure backend copy to `DynamicGraph` (preserves features, metric, and `transformations_`; uses `threads` for edge-weight recomputation when converting from a `ReadOnlyGraph`).
-- `with_metric(metric: Metric | str, threads: int = 0) -> DynamicExplorationGraph`: Re-tags or auto-quantizes stored floating-point features to `metric`, preserving the current backend (`ReadOnlyGraph`, `SizeBoundedGraph`, or `DynamicGraph`). When moving from float to a quantized metric, appends the calibrated pipeline to `transformations_`; when changing between same-dtype metrics (e.g. `FP32_L2` -> `FP32_InnerProduct`), keeps features unchanged and recomputes edge weights if mutable.
-- `with_transformations(transformations: FeatureTransformation | Sequence[FeatureTransformation], metric: Metric | str | None = None, threads: int = 0) -> DynamicExplorationGraph`: Self-transforms stored floating-point features (`FP32`/`FP16`) using explicit fitted `transformations` and appends them to `transformations_`, preserving the current backend.
-- `with_features(features: np.ndarray, metric: Metric | str | None = None, order: Literal["label", "internal"] = "label", transformations: FeatureTransformation | Sequence[FeatureTransformation] | None = None, threads: int = 0) -> DynamicExplorationGraph`: Replaces graph features with an external array (auto-calibrating/quantizing FP32/FP16 arrays when needed and `transformations=None`), resets `transformations_` to the new pipeline, and preserves the current backend. `order` defaults to `"label"` (rows aligned with external labels); pass `"internal"` when rows already follow `graph.get_labels()`.
-- `to_reranker(metric: Metric | str, transformations: FeatureTransformation | Sequence[FeatureTransformation] | None = None, optimize: bool = True, threads: int = 0) -> Reranker`
-  - Extracts and quantizes base vectors directly from an `FP32`/`FP16` graph, chaining `graph.transformations_ + transformations`. For external datasets, construct `deglib.Reranker(metric, base_vectors, transformations=..., row_indices=..., optimize=..., threads=...)` directly.
-- `to_searcher(metric: Metric | str | None = None, reranker: Reranker | None = None, normalize_query: bool = False, optimize: bool = True, threads: int = 0) -> Searcher`
-  - Converts the graph to a `ReadOnlyGraph` in a single pass (applying/quantizing `metric` directly when `metric` differs from the current metric) and wraps it in a `Searcher`. For custom clustering parameters, pass `optimize=False` and call `searcher.optimize(...)`.
+
+```python
+graph.to_readonly() -> DynamicExplorationGraph
+graph.to_mutable(max_size: int = 0, threads: int = 0) -> DynamicExplorationGraph
+graph.to_dynamic(chunk_size: int = 1024, threads: int = 0) -> DynamicExplorationGraph
+
+graph.with_metric(metric: Metric | str, threads: int = 0) -> DynamicExplorationGraph
+
+graph.with_transformations(
+    transformations: FeatureTransformation | Sequence[FeatureTransformation],
+    metric: Metric | str | None = None,
+    threads: int = 0,
+) -> DynamicExplorationGraph
+
+graph.with_features(
+    features: np.ndarray,
+    metric: Metric | str | None = None,
+    order: Literal["label", "internal"] = "label",
+    transformations: FeatureTransformation | Sequence[FeatureTransformation] | None = None,
+    threads: int = 0,
+) -> DynamicExplorationGraph
+
+graph.to_reranker(
+    metric: Metric | str,
+    transformations: FeatureTransformation | Sequence[FeatureTransformation] | None = None,
+    optimize: bool = True,
+    threads: int = 0,
+) -> Reranker
+
+graph.to_searcher(
+    metric: Metric | str | None = None,
+    reranker: Reranker | None = None,
+    normalize_query: bool = False,
+    optimize: bool = True,
+    threads: int = 0,
+) -> Searcher
+```
+
+- **`to_readonly` / `to_mutable` / `to_dynamic`**: Pure backend copies preserving features, metric, and attached transformations (`threads` is used for parallel edge-weight recomputation when converting from `ReadOnlyGraph`).
+- **`with_metric`**: Re-tags or auto-quantizes stored floating-point features to `metric`, preserving the current backend (`ReadOnlyGraph`, `SizeBoundedGraph`, or `DynamicGraph`).
+- **`with_transformations`**: Self-transforms stored `FP32`/`FP16` features using explicit fitted `transformations` and appends them to the graph's query pipeline, preserving the current backend.
+- **`with_features`**: Replaces graph features with an external array (auto-calibrating/quantizing `FP32`/`FP16` arrays when `transformations=None`), resets the query pipeline, and preserves the current backend. `order="label"` indexes rows by external labels; `order="internal"` expects rows aligned with `graph.get_labels()`.
+- **`to_reranker`**: Extracts and quantizes base vectors directly from an `FP32`/`FP16` graph, chaining the graph's prefix transformations with `transformations`.
+- **`to_searcher`**: Converts the graph to a `ReadOnlyGraph` in a single pass (applying/quantizing `metric` directly when `metric` differs) and wraps it in a `Searcher`.
+
+---
 
 #### Direct Graph Search & Exploration
-- `search(query: np.ndarray, eps_or_ef: float = 0.0, k: int = 10, filter_labels: Any = None, max_distance_computation_count: int = 0, threads: int = 0, return_distances: bool = True, unsorted: bool = False) -> SearchResults`
-- `explore(entry_external_label: int | np.ndarray | Sequence[int], k: int, max_distance_computation_count: int = 0, eps_or_ef: float = 0.0, include_entry: bool = True, threads: int = 1, filter_labels: Any = None, return_distances: bool = True, unsorted: bool = False) -> SearchResults`
+
+```python
+graph.search(
+    query: np.ndarray,
+    eps_or_ef: float = 0.0,
+    k: int = 10,
+    filter_labels: Any = None,
+    max_distance_computation_count: int = 0,
+    threads: int = 0,
+    return_distances: bool = True,
+    unsorted: bool = False,
+) -> SearchResults
+
+graph.explore(
+    entry_external_label: int | np.ndarray | Sequence[int],
+    k: int,
+    max_distance_computation_count: int = 0,
+    eps_or_ef: float = 0.0,
+    include_entry: bool = True,
+    threads: int = 1,
+    filter_labels: Any = None,
+    return_distances: bool = True,
+    unsorted: bool = False,
+) -> SearchResults
+```
+
+- **`query`**: 1D query vector or 2D query batch `(N, dim)`.
+- **`eps_or_ef`**: Search budget (`< 1.0`: relative distance margin `eps`; `>= 1.0`: fixed beam size `ef`).
+- **`k`**: Number of nearest neighbors to return.
+- **`filter_labels`**: Optional `Filter` instance, 1D array, or sequence of allowed external labels.
+- **`max_distance_computation_count`**: Optional hard cap on distance evaluations (`0` = unlimited).
+- **`threads`**: Worker thread count for batch queries (`0` uses all CPU cores).
+- **`return_distances`**: If `False`, `.distances` on `SearchResults` is `None`.
+- **`unsorted`**: If `True`, skips final sorting of returned candidates.
+- **`entry_external_label` / `include_entry`** (`explore` only): Starting external vertex label(s) and whether to include the entry vertex in the results.
 
 ---
 
 ## 4. Incremental Graph Building (`deglib.builder`)
 
-### `OptimizationTarget` (`Enum`)
-- `OptimizationTarget.StreamingData`
-- `OptimizationTarget.LowLID`
-- `OptimizationTarget.HighLID`
+### `OptimizationTarget` (`IntEnum`)
+
+- `OptimizationTarget.Auto`: Predicts `LowLID` vs. `StreamingData` from dataset geometry (resolved to `LowLID` in `GraphBuilder` when passed directly).
+- `OptimizationTarget.StreamingData`: Sequential single-threaded insertion/deletion for shifting data streams.
+- `OptimizationTarget.HighLID`: Parallel batch extension replacing worst neighbor edges (for LID > 15).
+- `OptimizationTarget.LowLID`: Default parallel batch extension minimizing metric distortion (for LID <= 15).
 - `OptimizationTarget.resolve(target: OptimizationTarget | str | int) -> OptimizationTarget`
 
 ### `GraphBuilder`
@@ -270,20 +618,49 @@ GraphBuilder(
 )
 ```
 
-Methods:
-- `add_entry(external_label: int | Iterable[int] | np.ndarray, feature: np.ndarray) -> None`
-- `remove_entry(external_label: int | Iterable[int] | np.ndarray) -> None`
-- `get_num_new_entries() -> int`
-- `get_num_remove_entries() -> int`
-- `set_threads(threads: int) -> None` (`0` selects all available CPU cores)
-- `set_batch_size(tasks_per_batch: int, task_size: int) -> None`
-- `get_batch_size() -> int`
-- `build(callback: Callable[[BuilderStatus], None] | None = None, show_progress: bool = False, infinite: bool = False) -> BuilderStatus`
-- `stop() -> None`
+**Parameters:**
+- **`graph`**: Mutable `DynamicExplorationGraph` (`SizeBoundedGraph` or `DynamicGraph`).
+- **`seed`**: Random seed for graph construction.
+- **`optimization_target`**: Construction strategy (`LowLID`, `HighLID`, `StreamingData`, or `Auto`).
+- **`extend_k`**: Candidate pool size during neighbor extension (`<= edges_per_vertex` defaults to `2 * edges_per_vertex`).
+- **`extend_eps`**: Exploration tolerance `eps` during neighbor extension.
+- **`improve_k`**: Candidate pool size during edge improvement (`0` defaults to `edges_per_vertex`).
+- **`improve_eps`**: Exploration tolerance `eps` during edge improvement.
+- **`max_path_length`**: Maximum path length for RNG edge pruning/improvement.
+- **`improve_tries`**: Number of improvement passes per step.
+- **`threads`**: Worker thread count (`0` uses default/all cores).
+
+**Methods:**
+
+```python
+builder.add_entry(external_label: int | Iterable[int] | np.ndarray, feature: np.ndarray) -> None
+builder.remove_entry(external_label: int | Iterable[int] | np.ndarray) -> None
+builder.get_num_new_entries() -> int
+builder.get_num_remove_entries() -> int
+builder.set_threads(threads: int) -> None
+builder.set_batch_size(tasks_per_batch: int, task_size: int) -> None
+builder.get_batch_size() -> int
+builder.build(
+    callback: Callable[[BuilderStatus], None] | None = None,
+    show_progress: bool = False,
+    infinite: bool = False,
+) -> BuilderStatus
+builder.stop() -> None
+```
 
 ### `BuilderStatus` & `ProgressCallback`
-- `BuilderStatus` attributes: `step`, `added`, `deleted`, `tries`, `improved`, `quality_changed`, `total_added_ids`, `total_deleted_ids`, `step_added_ids`, `step_deleted_ids`.
-- `ProgressCallback(num_new_entries: int, num_remove_entries: int, bar_length: int = 60, min_print_interval: float = 0.1)`
+
+- **`BuilderStatus` attributes**: `step`, `added`, `deleted`, `improved`, `tries`, `step_added_ids`, `step_deleted_ids`, `total_added_ids`, `total_deleted_ids`.
+- **`ProgressCallback`**:
+
+```python
+ProgressCallback(
+    num_new_entries: int,
+    num_remove_entries: int,
+    bar_length: int = 60,
+    min_print_interval: float = 0.1,
+)
+```
 
 ---
 
@@ -293,12 +670,12 @@ Methods:
 
 Returned by `DynamicExplorationGraph.search()`, `DynamicExplorationGraph.explore()`, and `Searcher.search()`. Holds C++ result memory exposed to Python as zero-copy NumPy views:
 
-- `indices: np.ndarray` (`uint32`, 1D `(found,)` / `(k,)` or 2D `(N, k)` for batches)
-- `distances: np.ndarray | None` (`float32`, same shape when `return_distances=True`, else `None`)
-- `graph_distance_count: int` — total graph vertex distance evaluations performed
-- `rerank_distance_count: int` — total exact reranker distance evaluations performed (`0` unless `rerank_factor > 1.0` with a reranker)
-- `graph_hop_count: int` — total graph vertex expansions (hops) performed
-- `__len__() -> int` — number of results (single query) or query count (batch)
+- **`indices: np.ndarray`**: `uint32`, 1D `(found,)` / `(k,)` or 2D `(N, k)` for batches.
+- **`distances: np.ndarray | None`**: `float32`, same shape when `return_distances=True`, else `None`.
+- **`graph_distance_count: int`**: Total graph vertex distance evaluations performed.
+- **`rerank_distance_count: int`**: Total exact reranker distance evaluations performed (`0` unless `rerank_factor > 1.0` with a reranker).
+- **`graph_hop_count: int`**: Total graph vertex expansions (hops) performed.
+- **`__len__() -> int`**: Number of results (single query) or query count (batch).
 
 ### `Searcher`
 
@@ -307,21 +684,79 @@ Searcher(
     graph: DynamicExplorationGraph,
     reranker: Reranker | None = None,
     normalize_query: bool = False,
-    optimize: bool = True,
+    optimize: bool = False,
     threads: int = 0,
 )
 ```
 
-`Searcher` attributes & methods:
-- `searcher.graph -> DynamicExplorationGraph` (the backing read-only graph)
-- `searcher.normalize_query -> bool` (get/set query L2 normalization)
-- `searcher.optimize(n_clusters: int = 256, n_iter: int = 20, sample_size: int = 0, threads: int = 0, use_routing: bool = True) -> None`
-- `searcher.search(query: np.ndarray, k: int = 10, eps_or_ef: float = 0.1, rerank_factor: float = 1.0, threads: int = 1, return_distances: bool = False, unsorted: bool = False, max_distance_computation_count: int = 0) -> SearchResults`
-  - `eps_or_ef < 1.0`: relative distance margin (`eps`); `eps_or_ef >= 1.0`: fixed beam size (`ef`).
-  - Defaults `return_distances=False, unsorted=False` (populates 1D `(found,)` or 2D `(N, k)` `.indices`, `.distances=None` unless `return_distances=True`, plus traversal/rerank telemetry).
-- `searcher.to_recall_table(k: int, mode: Literal["ef", "eps"], rerank_factor: float = 1.0, sample_count: int = 300, recall_range: tuple[float, float] | None = None, recall_step: float | None = None, target_recalls: Sequence[float] | np.ndarray | None = None, threads: int = 0) -> RecallTable`
-- `searcher.to_recall_tables(k: int, sample_count: int = 300, recall_range: tuple[float, float] | None = None, recall_step: float | None = None, target_recalls: Sequence[float] | np.ndarray | None = None, rerank_factors: Sequence[float] | np.ndarray | None = None, threads: int = 0) -> list[RecallTable]`: Calibrates `("ef", "eps") x rerank_factors` in a shared single pass (`rerank_factors` defaults to `[1.0, 1.25, 1.5, 2.0]` when a reranker is attached, else `[1.0]`).
-- `searcher.to_pareto_line(k: int | None = None, recall_tables: RecallTable | Sequence[RecallTable] | None = None, sample_count: int | None = None, recall_range: tuple[float, float] | None = None, recall_step: float | None = None, target_recalls: Sequence[float] | np.ndarray | None = None, rerank_factors: Sequence[float] | np.ndarray | None = None, threads: int = 0, rounds: int = 3) -> ParetoLine`
+**Parameters:**
+- **`graph`**: Backing `DynamicExplorationGraph` (typically a `ReadOnlyGraph`).
+- **`reranker`**: Optional `Reranker` for two-stage candidate re-scoring.
+- **`normalize_query`**: If `True`, L2-normalizes `float32` queries before graph traversal.
+- **`optimize`**: If `True`, calls `self.optimize(threads=threads)` after construction.
+- **`threads`**: Worker thread count used when `optimize=True` (`0` uses all CPU cores).
+
+**Attributes & Methods:**
+
+```python
+searcher.graph -> DynamicExplorationGraph
+searcher.normalize_query -> bool  # get/set
+
+searcher.optimize(
+    n_clusters: int = 256,
+    n_iter: int = 20,
+    sample_size: int = 0,
+    threads: int = 0,
+    use_routing: bool = True,
+) -> None
+
+searcher.search(
+    query: np.ndarray,
+    k: int = 10,
+    eps_or_ef: float = 0.1,
+    rerank_factor: float = 1.0,
+    threads: int = 1,
+    return_distances: bool = False,
+    unsorted: bool = False,
+    max_distance_computation_count: int = 0,
+) -> SearchResults
+
+searcher.to_recall_table(
+    k: int,
+    mode: Literal["ef", "eps"],
+    rerank_factor: float = 1.0,
+    sample_count: int = 300,
+    recall_range: tuple[float, float] | None = None,
+    recall_step: float | None = None,
+    target_recalls: Sequence[float] | np.ndarray | None = None,
+    threads: int = 0,
+) -> RecallTable
+
+searcher.to_recall_tables(
+    k: int,
+    sample_count: int = 300,
+    recall_range: tuple[float, float] | None = None,
+    recall_step: float | None = None,
+    target_recalls: Sequence[float] | np.ndarray | None = None,
+    rerank_factors: Sequence[float] | np.ndarray | None = None,
+    threads: int = 0,
+) -> list[RecallTable]
+
+searcher.to_pareto_line(
+    k: int | None = None,
+    recall_tables: RecallTable | Sequence[RecallTable] | None = None,
+    sample_count: int | None = None,
+    recall_range: tuple[float, float] | None = None,
+    recall_step: float | None = None,
+    target_recalls: Sequence[float] | np.ndarray | None = None,
+    rerank_factors: Sequence[float] | np.ndarray | None = None,
+    threads: int = 0,
+    rounds: int = 3,
+) -> ParetoLine
+```
+
+- **`search(...)`**: `eps_or_ef < 1.0` uses relative distance margin `eps`; `eps_or_ef >= 1.0` uses fixed beam size `ef`. Defaults `return_distances=False, unsorted=False`.
+- **`to_recall_tables(...)`**: Calibrates `("ef", "eps") x rerank_factors` in a shared single pass (`rerank_factors` defaults to `[1.0, 1.25, 1.5, 2.0]` when a reranker is attached, else `[1.0]`).
 
 ### `Filter`
 
@@ -329,17 +764,19 @@ Searcher(
 Filter(valid_labels: np.ndarray, max_value: int = -1, max_label_count: int = -1)
 ```
 
+Bitset filter restricting graph search and exploration to a subset of external labels.
+
 ### `RecallTable`
 
-- `RecallTable` (returned by `graph.to_recall_table(...)` / `to_recall_tables(...)` and `searcher.to_recall_table(...)` / `to_recall_tables(...)`):
-  - Properties: `.k -> int`, `.sample_count -> int`, `.is_ef -> bool`, `.is_eps -> bool`, `.rerank_factor -> float`, `.recall_bounds -> tuple[float, float] | None`, `.entries -> list[tuple[float, float, float]]` (`(target_recall, eps_or_ef, measured_recall)`)
-  - Methods: `.eps_or_ef_values() -> list[float]`, `.param_for(target_recall: float, clamp: bool = False) -> float | None`, `len(table)`, `str(table)`
+Returned by `graph.to_recall_table(...)` / `to_recall_tables(...)` and `searcher.to_recall_table(...)` / `to_recall_tables(...)`:
+- **Properties**: `.k -> int`, `.sample_count -> int`, `.is_ef -> bool`, `.is_eps -> bool`, `.rerank_factor -> float`, `.recall_bounds -> tuple[float, float] | None`, `.entries -> list[tuple[float, float, float]]` (`(target_recall, eps_or_ef, measured_recall)`)
+- **Methods**: `.eps_or_ef_values() -> list[float]`, `.param_for(target_recall: float, clamp: bool = False) -> float | None`, `len(table)`, `str(table)`
 
 ### `ParetoLine`
 
-- `ParetoLine` (returned by `graph.to_pareto_line(...)` and `searcher.to_pareto_line(...)`):
-  - Properties: `.k -> int`, `.sample_count -> int`, `.recall_bounds -> tuple[float, float] | None`, `.recall_tables -> list[RecallTable]`, `.entries -> list[tuple[float, float, float, float, float, float]]` (`(target_recall, eps_or_ef, rerank_factor, measured_recall, latency_us, qps)`)
-  - Methods: `.eps_or_ef_values() -> list[float]`, `.params() -> list[tuple[float, float]]`, `.param_for(target_recall: float, clamp: bool = False) -> tuple[float, float] | None` (nearest frontier entry by `measured_recall`, no interpolation), `len(line)`, `str(line)`
+Returned by `graph.to_pareto_line(...)` and `searcher.to_pareto_line(...)`:
+- **Properties**: `.k -> int`, `.sample_count -> int`, `.recall_bounds -> tuple[float, float] | None`, `.recall_tables -> list[RecallTable]`, `.entries -> list[tuple[float, float, float, float, float, float]]` (`(target_recall, eps_or_ef, rerank_factor, measured_recall, latency_us, qps)`)
+- **Methods**: `.eps_or_ef_values() -> list[float]`, `.params() -> list[tuple[float, float]]`, `.param_for(target_recall: float, clamp: bool = False) -> tuple[float, float] | None` (nearest frontier entry by `measured_recall`, no interpolation), `len(line)`, `str(line)`
 
 ### `Reranker` & `rerank`
 
@@ -350,17 +787,40 @@ Reranker(
     transformations: FeatureTransformation | Sequence[FeatureTransformation] | None = None,
     optimize: bool = False,
     threads: int = 0,
+    row_indices: np.ndarray | None = None,
 )
 ```
 
-Methods:
-- `get_num_base_vectors() -> int`, `get_po() -> int`, `get_pl() -> int`
-- `optimize(sample_count: int = 300, num_candidates: int = 150) -> None`
-- `rerank(queries: np.ndarray, candidate_indices: np.ndarray, k_top: int = 0, threads: int = 0, return_distances: bool = False, unsorted: bool = False) -> np.ndarray | tuple[np.ndarray, np.ndarray]`
+**Parameters:**
+- **`metric`**: Distance metric used to score candidates (e.g. `Metric.FP16_L2`, `Metric.FP32_InnerProduct`).
+- **`base_vectors`**: 2D array of base vectors. If `float32` or `float16`, automatically converted/quantized to `metric` using `transformations` (or an auto-calibrated quantizer).
+- **`transformations`**: Optional fitted `FeatureTransformation` or sequence applied to queries (and `float32`/`float16` `base_vectors` when needed).
+- **`optimize`**: If `True`, runs `self.optimize()` immediately after construction.
+- **`threads`**: Worker thread count for quantization (`0` uses all CPU cores).
+- **`row_indices`**: Optional 1D `uint32` index mapping (e.g. `graph.get_labels()`) when `base_vectors` is indexed by external labels.
 
-Functional helper:
+**Methods:**
+
 ```python
-rerank(
+reranker.get_num_base_vectors() -> int
+reranker.get_instruction() -> InstructionSet
+reranker.get_po() -> int
+reranker.get_pl() -> int
+reranker.optimize(sample_count: int = 300, num_candidates: int = 150) -> None
+reranker.rerank(
+    queries: np.ndarray,
+    candidate_indices: np.ndarray,
+    k_top: int = 0,
+    threads: int = 0,
+    return_distances: bool = False,
+    unsorted: bool = False,
+) -> np.ndarray | tuple[np.ndarray, np.ndarray]
+```
+
+**Functional helper:**
+
+```python
+deglib.search.rerank(
     metric: Metric | str,
     queries: np.ndarray,
     candidate_indices: np.ndarray,
@@ -378,47 +838,181 @@ rerank(
 
 ## 6. Feature Transformations & Quantization (`deglib.transformation`)
 
-All transformations are created pre-fitted and validated via `make_*` factories and share the `FeatureTransformation` interface (`name`, `type` (`TransformationType`: `Spatial`, `Rotation`, `Quantizer`), `input_dim`, `output_dim`, `output_dtype`, `output_byte_size`, `is_fitted`, `transform_database(vectors, threads=0)`, `transform_query(queries)`, `serialize()`). Raw unfitted quantizer constructors and `mips_l2_transform(_query)` are not part of the API.
+All transformations are created pre-fitted and validated via `make_*` factories and share the `FeatureTransformation` interface:
+- **Properties**: `name`, `type` (`TransformationType`: `Spatial`, `Rotation`, `Quantizer`), `input_dim`, `output_dim`, `output_dtype`, `output_byte_size`, `is_fitted`
+- **Methods**: `transform_database(vectors, threads=0)`, `transform_query(queries)`, `serialize()`
 
-- `make_mips_transform(vectors: np.ndarray, max_norm: float = 0.0) -> FeatureTransformation` (`MipsTransform` exposing `.transform_database(...)` and `.transform_query(...)`)
-- `make_l2_normalize_transform(vectors_or_dim: np.ndarray | int) -> FeatureTransformation`
-- `make_fast_hadamard_rotation(vectors: np.ndarray, seed: int = 7, rounds: int = 0, auto_detect: bool = True) -> FeatureTransformation`
-- `make_quantizer_pipeline(vectors: np.ndarray, quant: Metric | str, quantile: float = -1.0, use_rerank: bool = False, threads: int = 0, seed: int = 7) -> list[FeatureTransformation]`
-- `make_evp_quantizer(vectors: np.ndarray, non_zeros: int = 0, threads: int = 0) -> FeatureTransformation` (`non_zeros=0` auto-calibrates sparsity)
-- `make_scalar_quantizer_int8(vectors: np.ndarray, quantile: float = -1.0) -> FeatureTransformation`
-- `make_scalar_quantizer_uint8(vectors: np.ndarray, quantile: float = -1.0) -> FeatureTransformation`
-- `make_scalar_quantizer_uint7(vectors: np.ndarray, quantile: float = -1.0) -> FeatureTransformation`
-- `make_scalar_quantizer_uint4(vectors: np.ndarray, quantile: float = -1.0) -> FeatureTransformation`
-- `make_scalar_quantizer_int4(vectors: np.ndarray, quantile: float = -1.0) -> FeatureTransformation`
-- `make_scalar_quantizer_fp16(vectors: np.ndarray, quantile: float = -1.0) -> FeatureTransformation`
-- `apply_on_database(transformations: FeatureTransformation | Sequence[FeatureTransformation], vectors: np.ndarray, threads: int = 0) -> np.ndarray`
-- `apply_on_query(transformations: FeatureTransformation | Sequence[FeatureTransformation], queries: np.ndarray) -> np.ndarray`
+```python
+make_mips_transform(vectors: np.ndarray, max_norm: float = 0.0) -> FeatureTransformation
+make_l2_normalize_transform(vectors_or_dim: np.ndarray | int) -> FeatureTransformation
+make_fast_hadamard_rotation(
+    vectors: np.ndarray,
+    seed: int = 7,
+    rounds: int = 0,
+    auto_detect: bool = True,
+) -> FeatureTransformation
+make_quantizer_pipeline(
+    vectors: np.ndarray,
+    quant: Metric | str,
+    quantile: float = -1.0,
+    use_rerank: bool = False,
+    threads: int = 0,
+    seed: int = 7,
+) -> list[FeatureTransformation]
+make_evp_quantizer(vectors: np.ndarray, non_zeros: int = 0, threads: int = 0) -> FeatureTransformation
+make_scalar_quantizer_int8(vectors: np.ndarray, quantile: float = -1.0) -> FeatureTransformation
+make_scalar_quantizer_uint8(vectors: np.ndarray, quantile: float = -1.0) -> FeatureTransformation
+make_scalar_quantizer_uint7(vectors: np.ndarray, quantile: float = -1.0) -> FeatureTransformation
+make_scalar_quantizer_uint4(vectors: np.ndarray, quantile: float = -1.0) -> FeatureTransformation
+make_scalar_quantizer_int4(vectors: np.ndarray, quantile: float = -1.0) -> FeatureTransformation
+make_scalar_quantizer_fp16(vectors: np.ndarray, quantile: float = -1.0) -> FeatureTransformation
+
+apply_on_database(
+    transformations: FeatureTransformation | Sequence[FeatureTransformation],
+    vectors: np.ndarray,
+    threads: int = 0,
+) -> np.ndarray
+apply_on_query(
+    transformations: FeatureTransformation | Sequence[FeatureTransformation],
+    queries: np.ndarray,
+) -> np.ndarray
+```
+
+- **`make_mips_transform`**: Spherical MIPS-to-L2 transform (`d -> d + 1`), appending `sqrt(M^2 - ||x||^2)` on database vectors and `0.0` on query vectors (`max_norm <= 0` calibrates `M` as max norm).
+- **`make_l2_normalize_transform`**: Unit L2 normalization (`x -> x / ||x||_2`).
+- **`make_fast_hadamard_rotation`**: Randomized Fast Walsh-Hadamard rotation to spread outlier coordinates before quantization.
+- **`make_quantizer_pipeline`**: Builds a calibrated pipeline (optional Hadamard rotation + quantizer) for `quant` (`Metric` or string such as `"uint7"`, `"int8"`, `"uint4"`, `"fp16"`, `"evp"`).
+- **`make_evp_quantizer`**: Calibrates `EvpQuantizer` (`non_zeros=0` auto-calibrates sparsity).
 
 ---
 
 ## 7. Optimization & Pruning (`deglib.optimization`)
 
-- `presort(vectors: np.ndarray, metric: Metric | str = Metric.FP32_L2, radius_decay: float = 0.9, threads: int = 0, callback: Callable[[float], bool | None] | None = None, show_progress: bool = False) -> np.ndarray`: Runs 1D FLAS spatial sorting; returns `uint32` permutation indices. (`callback(progress)` cancels sorting only if it explicitly returns `True`.)
-- `prune_non_mrng_edges(graph: DynamicExplorationGraph, threads: int = 0) -> int`
-- `prune_worst_edges(graph: DynamicExplorationGraph, prune_worst: int, threads: int = 0) -> None`
+```python
+presort(
+    vectors: np.ndarray,
+    metric: Metric | str = Metric.FP32_L2,
+    radius_decay: float = 0.9,
+    threads: int = 0,
+    callback: Callable[[float], bool | None] | None = None,
+    show_progress: bool = False,
+) -> np.ndarray
+
+prune_non_mrng_edges(graph: DynamicExplorationGraph, threads: int = 0) -> int
+prune_worst_edges(graph: DynamicExplorationGraph, prune_worst: int, threads: int = 0) -> None
+```
+
+- **`presort`**: Runs 1D FLAS spatial sorting; returns `uint32` permutation indices (`callback(progress)` cancels sorting if it returns `True`).
+- **`prune_non_mrng_edges`**: Prunes edges violating the Monotonic Relative Neighborhood Graph (MRNG) condition in-place; returns the number of modified vertices.
+- **`prune_worst_edges`**: Replaces the `prune_worst` longest outgoing edges of each vertex with self-loops in-place.
 
 ---
 
 ## 8. Graph Analysis (`deglib.analysis`)
 
-- `analyze_graph(graph: Any, base_top: Any | None = None, sample_size: int = 0, threads: int = 0, print_stats: bool = True) -> GraphStats`
-- `calc_graph_quality(graph: Any, base_top: Any, sample_size: int = 0, threads: int = 0) -> float`
-- `GraphStats`: summary metrics returned by `analyze_graph`.
+```python
+analyze_graph(
+    graph: Any,
+    base_top: Any | None = None,
+    sample_size: int = 0,
+    threads: int = 0,
+    print_stats: bool = True,
+) -> GraphStats
+
+calc_graph_quality(
+    graph: Any,
+    base_top: Any,
+    sample_size: int = 0,
+    threads: int = 0,
+) -> float
+
+calc_avg_edge_weight(graph: Any, scale: int = 1) -> float
+calc_edge_weight_histogram(graph: Any, sort: bool, scale: int = 1) -> list[float]
+check_graph_weights(graph: Any) -> bool
+check_graph_regularity(graph: Any, expected_vertices: int, check_back_link: bool = False) -> bool
+check_graph_connectivity(graph: Any) -> bool
+calc_non_mrng_edges(graph: Any) -> int
+calc_search_reachability(graph: Any) -> float
+calc_exploration_reach(graph: Any) -> float
+```
+
+- **`GraphStats`**: Summary metrics returned by `analyze_graph` (supports attribute, dict-like indexing, `.keys()`, `.to_dict()`, and `str(stats)`).
 
 ---
 
 ## 9. Pre-Build Tuning & Prediction (`deglib.tuning`)
 
-Base-only geometric profiling and hyperparameter prediction from `float32`/`float16` feature vectors (no queries or ground truth required). Also re-exported at top level (`deglib.*`).
+Base-only geometric profiling and hyperparameter prediction from `float32`/`float16` feature vectors (no queries or ground truth required).
 
-- `DatasetProfile(sample_count=0, dim=0, participation_ratio=0.0, d1_cv=0.0, rel_contrast_1=0.0, metric=Metric.FP32_L2)`: frozen dataclass storing measured dataset geometry.
-- `TargetPrediction(target: OptimizationTarget, lowlid_advantage_pct: float, profile: DatasetProfile)`: predicted graph construction optimization target (`LowLID` vs `StreamingData`).
-- `QuantizationPrediction(metric: Metric, uint7_advantage_pct: float, profile: DatasetProfile)`: predicted quantizer metric (`Metric.Uint7_L2` vs `Metric.Int8_InnerProduct`).
-- `measure_dataset_profile(data: np.ndarray, metric: Metric | str | int = Metric.FP32_L2, sample_count: int = 16000, query_count: int = 0, seed: int = 7, threads: int = 0) -> DatasetProfile`
-- `predict_optimization_target(data_or_profile: np.ndarray | DatasetProfile, metric: Metric | str | int = Metric.FP32_L2, sample_count: int = 16000, query_count: int = 0, seed: int = 7, threads: int = 0) -> TargetPrediction`
-- `predict_quantization(data_or_profile: np.ndarray | DatasetProfile, metric: Metric | str | int = Metric.FP32_L2, sample_count: int = 16000, query_count: int = 0, seed: int = 7, threads: int = 0) -> QuantizationPrediction`: predicts whether `Metric.Uint7_L2` or `Metric.Int8_InnerProduct` achieves higher QPS (L2/Euclidean datasets unconditionally select `Metric.Uint7_L2`).
+### Data Classes
+
+```python
+@dataclass(frozen=True)
+class DatasetProfile:
+    sample_count: int = 0
+    dim: int = 0
+    participation_ratio: float = 0.0
+    rel_contrast_1: float = 0.0
+    pp_iqr: float = 0.0
+    d16_skew: float = 0.0
+    ball_cnt_p90_p10_r15: float = 0.0
+    hadamard_kurt: float = 0.0
+    metric: Metric = Metric.FP32_L2
+
+@dataclass(frozen=True)
+class TargetPrediction:
+    target: OptimizationTarget
+    lowlid_advantage_pct: float
+    profile: DatasetProfile
+
+@dataclass(frozen=True)
+class QuantizationPrediction:
+    metric: Metric
+    uint7_advantage_pct: float
+    profile: DatasetProfile
+```
+
+### Functions
+
+```python
+measure_dataset_profile(
+    data: np.ndarray,
+    metric: Metric | str | int = Metric.FP32_L2,
+    sample_count: int = 16000,
+    query_count: int = 0,
+    seed: int = 7,
+    threads: int = 0,
+) -> DatasetProfile
+
+predict_optimization_target(
+    data_or_profile: np.ndarray | DatasetProfile,
+    metric: Metric | str | int = Metric.FP32_L2,
+    sample_count: int = 16000,
+    query_count: int = 0,
+    seed: int = 7,
+    threads: int = 0,
+) -> TargetPrediction
+
+predict_quantization(
+    data_or_graph: np.ndarray | DynamicExplorationGraph,
+    metric: Metric | str | int = Metric.FP32_L2,
+    sample_count: int = 16000,
+    query_count: int = 0,
+    seed: int = 7,
+    threads: int = 0,
+) -> QuantizationPrediction
+
+predict_quantization_normalized(
+    data: np.ndarray,
+    is_cosine: bool,
+    metric: Metric | str | int = Metric.FP32_InnerProduct,
+    sample_count: int = 16000,
+    seed: int = 7,
+    threads: int = 0,
+) -> QuantizationPrediction
+```
+
+- **`measure_dataset_profile`**: Computes base-only geometric properties used for pre-build tuning.
+- **`predict_optimization_target`**: Predicts whether `OptimizationTarget.LowLID` outperforms `OptimizationTarget.StreamingData`.
+- **`predict_quantization`**: Predicts whether `Metric.Uint7_L2` or `Metric.Int8_InnerProduct` achieves higher QPS (L2/Euclidean datasets unconditionally select `Metric.Uint7_L2`; accepts either a 2D array or a `DynamicExplorationGraph`).
+- **`predict_quantization_normalized`**: Predicts `Metric.Uint7_L2` vs. `Metric.Int8_InnerProduct` from already L2-normalized vectors (`is_cosine=True` when `L2NormalizeTransform` was attached).
