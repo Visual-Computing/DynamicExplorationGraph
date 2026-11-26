@@ -336,7 +336,7 @@ def build(
           ``FP16_InnerProduct`` for ``metric="ip"``).
         - ``"32bit"`` (also ``"fp32"``, ``"float32"``): Keep/target 32-bit float precision.
         - ``"16bit"`` (also ``"fp16"``, ``"float16"``): ``FP16_L2`` or ``FP16_InnerProduct``.
-        - ``"8bit"`` / ``"auto"``: ``Uint7_L2`` (L2), auto-selected IP quantizer (cosine),
+        - ``"8bit"`` / ``"auto"``: ``Uint7_L2`` (L2), ``Int8_InnerProduct`` or ``Uint7_L2`` (cosine/normalized, auto-selected),
           or ``FastHadamardRotation + Int8_InnerProduct`` (``metric="ip"``).
         - ``"4bit"``: Always ``Uint4_L2`` (with ``MipsTransform`` for ``metric="ip"``).
         - ``"2bit"`` (also ``"evp"``): ``EVP_InnerProduct``.

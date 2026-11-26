@@ -41,7 +41,7 @@ This reference documents the exact internal behavior of the high-level Python AP
 | `"l2"` | `"2bit"` / `"evp"` | `EVP_InnerProduct` | `[EvpQuantizer]` | `d` | `SizeBoundedGraph` |
 | `"cosine"` | `None` / `"32bit"` | `FP32_InnerProduct` (`FP16_InnerProduct` for `float16`) | `[L2NormalizeTransform]` *(if input unnormalized)* | `d` | `SizeBoundedGraph` |
 | `"cosine"` | `"16bit"` | `FP16_InnerProduct` | `[L2Norm?, ScalarQuantizerFP16]` | `d` | `SizeBoundedGraph` |
-| `"cosine"` | `"8bit"` / `"auto"` | `predict_quantization(...)` (`Int8_InnerProduct` vs. `Uint7_L2`) | `[L2Norm?, (FWHT), ScalarQuantizer*]` | `d` | `SizeBoundedGraph` |
+| `"cosine"` | `"8bit"` / `"auto"` | `predict_quantization(data)` (**K5-Top**: `Int8_InnerProduct` vs. `Uint7_L2`) | `[L2Norm?, (FWHT), ScalarQuantizer*]` | `d` | `SizeBoundedGraph` |
 | `"cosine"` | `"4bit"` | `Uint4_L2` | `[L2NormalizeTransform?, (FWHT), ScalarQuantizerUint4]` | `d` | `SizeBoundedGraph` |
 | `"cosine"` | `"2bit"` / `"evp"` | `EVP_InnerProduct` | `[L2Norm?, EvpQuantizer]` | `d` | `SizeBoundedGraph` |
 | **`"ip"`** | `None` / `"32bit"` | `FP32_InnerProduct` (`FP16_InnerProduct` for `float16`) | `[]` *(unnormalized)* | `d` | `SizeBoundedGraph` |
@@ -79,10 +79,19 @@ When `compress` is provided, `deglib.searcher(graph, compress=...)` calls `degli
 |---|---|---|---|
 | `None` / `"32bit"` | `FP32_InnerProduct` | existing | Returns `graph` unchanged if already `FP32_InnerProduct` (raises `ValueError` if `graph` is `FP16_InnerProduct`) |
 | `"16bit"` | `FP16_InnerProduct` | `[ScalarQuantizerFP16]` | Native MIPS without reranker |
-| `"8bit"` / `"auto"` | `Uint7_L2` or `Int8_InnerProduct` | `[(FWHT), ScalarQuantizer*]` | Uses `predict_quantization` (`Uint7_L2` vs. `Int8_InnerProduct`) on unit-sphere `cosine`/`normalized` graphs, and `Int8_InnerProduct` on unnormalized `InnerProduct` (`ip`) graphs |
+| `"8bit"` / `"auto"` | `Uint7_L2` or `Int8_InnerProduct` | `[(FWHT), ScalarQuantizer*]` | Uses `predict_quantization(graph)` (**A1+A2** via `predict_quantization_normalized(..., is_cosine=has_l2n)`) on unit-sphere `cosine`/`normalized` graphs, and `Int8_InnerProduct` on unnormalized `InnerProduct` (`ip`) graphs |
 | `"4bit"` | `Uint4_L2` | `[MipsTransform?, (FWHT), ScalarQuantizerUint4]` *(auto-prepends `MipsTransform` only when stored graph vectors are not unit-norm and have no prefix)* | Always uses `Uint4_L2` across `L2`, `cosine`/`normalized`, and `ip` |
 | `"2bit"` / `"evp"` | `EVP_InnerProduct` | `[EvpQuantizer]` | High-compression 2-bit filtering + reranking |
 | Explicit `L2` `Metric` (`Metric.Uint7_L2`, `Metric.Int8_L2`, `Metric.Uint4_L2`, `Metric.Uint8_L2`) | Target `L2` metric | `[MipsTransform?, (FWHT), ScalarQuantizer*]` *(auto-prepends `MipsTransform` via `mips=True` only when stored graph vectors are not unit-norm and have no prefix)* | Enables `L2` quantizers directly on `InnerProduct` graphs without adding `d+1` overhead on unit-norm `cosine`/`normalized` graphs |
+
+### 3.3 8-Bit Quantizer Predictor Rules (`K5-Top` vs. `A1+A2`)
+
+For `compress="8bit"` / `"auto"`, the target quantizer (`Uint7_L2` vs. `Int8_InnerProduct`) is chosen by:
+1. **`"l2"` / `"euclidean"`:** Always **`Uint7_L2`** (no predictor call).
+2. **`"ip"` (unnormalized `InnerProduct`):** Always **`Int8_InnerProduct`** (no predictor call).
+3. **`"cosine"` / `"normalized"` (unit-sphere `InnerProduct`):**
+   - **`K5-Top`** (`predict_quantization(data, ...)`): Used in **`deglib.build`** and **`deglib.reranker_with_data`** when raw unnormalized `data` is available (relies on raw norms via `log1p_mips_extra_ratio` and raw covariance via `top32_var_ratio`).
+   - **`A1+A2`** (`predict_quantization(graph, ...)` / `predict_quantization_normalized(data, is_cosine, ...)`): Used in **`deglib.compress`**, **`deglib.searcher(..., compress="8bit")`**, and **`deglib.reranker(..., compress="8bit")`** when only already-normalized 32-bit graph vectors remain (100% L2-normalization-invariant; `is_cosine` is preserved from `L2NormalizeTransform`).
 
 ---
 
@@ -90,8 +99,8 @@ When `compress` is provided, `deglib.searcher(graph, compress=...)` calls `degli
 
 | Function | Precondition | Behavior & Edge Cases |
 |---|---|---|
-| `deglib.reranker(graph, compress="16bit")` | `graph` is uncompressed (`FP32_*` or `FP16_*`); raises `ValueError` if `graph` is quantized | Extracts base vectors directly from `graph` (in internal `graph.get_labels()` order). Distance kind (`L2` vs. `InnerProduct`) is inferred from `graph.get_metric()`. Supports `compress` in `{None, "32bit", "16bit", "8bit"/"int8", "uint8", "uint7", Metric}`. Preserves `AVX512_VNNI` on `Int8_InnerProduct`. |
-| `deglib.reranker_with_data(graph, data, labels=..., compress="16bit", metric=...)` | Original `float32`/`float16` `data` available (works on both float and quantized graphs) | Maps `graph.get_labels()` to rows in `data` via `labels` (`0..N-1` fast path, sorted `searchsorted`, or dictionary lookup; raises `KeyError` on missing label) without copying `data`. Preserves any `L2NormalizeTransform` / `MipsTransform` prefix on `graph`. `metric="ip"` selects `InnerProduct` unless a `MipsTransform` prefix is present. |
+| `deglib.reranker(graph, compress="16bit")` | `graph` is uncompressed (`FP32_*` or `FP16_*`); raises `ValueError` if `graph` is quantized | Extracts base vectors directly from `graph` (in internal `graph.get_labels()` order). Distance kind (`L2` vs. `InnerProduct`) is inferred from `graph.get_metric()`. Supports `compress` in `{None, "32bit", "16bit", "8bit"/"auto", "int8", "uint8", "uint7", Metric}`. For `"8bit"`/`"auto"`: selects `Uint7_L2` (`L2`), `Int8_InnerProduct` (unnormalized `IP`), or `predict_quantization(graph)` (**A1+A2** on unit-sphere `cosine`/`normalized` graphs). Preserves `AVX512_VNNI` on `Int8_InnerProduct`. |
+| `deglib.reranker_with_data(graph, data, labels=..., compress="16bit", metric=...)` | Original `float32`/`float16` `data` available (works on both float and quantized graphs) | Maps `graph.get_labels()` to rows in `data` via `labels` (`0..N-1` fast path, sorted `searchsorted`, or dictionary lookup; raises `KeyError` on missing label) without copying `data`. Preserves any `L2NormalizeTransform` / `MipsTransform` prefix on `graph`. `metric="ip"` selects `InnerProduct` unless a `MipsTransform` prefix is present. For `compress="8bit"`/`"auto"`: selects `Uint7_L2` (`L2`), `Int8_InnerProduct` (unnormalized `IP`), or `predict_quantization(data)` (**K5-Top** on `cosine`/`normalized` `data`). |
 
 - **Shared-prefix deduplication (`Searcher::split_shared_prefix_transforms`):** When `searcher` and `reranker` share a leading spatial prefix (`L2NormalizeTransform` or `MipsTransform`), `Searcher` runs the prefix **once** per query and forwards the transformed `float32` query to both the quantized search graph and `reranker_->rerank_f32(..., reranker_transform_offset_)`.
 

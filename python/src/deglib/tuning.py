@@ -195,7 +195,7 @@ def predict_optimization_target(
 
 
 def predict_quantization(
-    data_or_profile: np.ndarray | DatasetProfile | object,
+    data_or_graph: np.ndarray | object,
     metric: Metric | str | int = Metric.FP32_L2,
     sample_count: int = 16000,
     query_count: int = 0,
@@ -205,28 +205,65 @@ def predict_quantization(
     """
     Predict whether ``Metric.Uint7_L2`` outperforms ``Metric.Int8_InnerProduct``.
 
-    Non-InnerProduct (L2) datasets unconditionally select ``Metric.Uint7_L2``.
-    Accepts a 2D ``float32``/``float16`` feature matrix, a ``DynamicExplorationGraph``,
-    or a precomputed :class:`DatasetProfile`.
+    Dispatches automatically based on input type:
+    - **2D NumPy array** (``deglib.build``, ``deglib.reranker_with_data``): uses **K5-Top** on raw unnormalized vectors.
+    - **``DynamicExplorationGraph``** (``deglib.compress``, ``deglib.searcher``, ``deglib.reranker``): uses the
+      L2-invariant **A1+A2** ensemble on unit-sphere ``cosine``/``normalized`` graphs (passing ``is_cosine`` from
+      ``L2NormalizeTransform``), ``Int8_InnerProduct`` on unnormalized ``IP`` graphs, and ``Uint7_L2`` on ``L2`` graphs.
     """
-    if hasattr(data_or_profile, "dynamic_exploration_graph_cpp"):
+    if hasattr(data_or_graph, "dynamic_exploration_graph_cpp"):
         _validate_counts(sample_count, query_count, seed, threads)
         raw = cpp_tuning.predict_quantization(
-            data_or_profile.dynamic_exploration_graph_cpp,
+            data_or_graph.dynamic_exploration_graph_cpp,
             int(sample_count),
             int(seed),
             int(threads),
         )
     else:
-        raw = _predict_from_data_or_profile(
-            cpp_tuning.predict_quantization,
-            data_or_profile,
-            metric,
-            sample_count,
-            query_count,
-            seed,
-            threads,
+        _validate_counts(sample_count, query_count, seed, threads)
+        arr = _prepare_vectors(data_or_graph)
+        cpp_metric = Metric.resolve(metric)._to_cpp_metric()
+        raw = cpp_tuning.predict_quantization(
+            arr,
+            metric=cpp_metric,
+            sample_count=int(sample_count),
+            query_count=int(query_count),
+            seed=int(seed),
+            threads=int(threads),
         )
+    return QuantizationPrediction(
+        metric=Metric(int(raw.metric)),
+        uint7_advantage_pct=float(raw.uint7_advantage_pct),
+        profile=_from_cpp_profile(raw.profile),
+    )
+
+
+def predict_quantization_normalized(
+    data: np.ndarray,
+    is_cosine: bool,
+    metric: Metric | str | int = Metric.FP32_InnerProduct,
+    sample_count: int = 16000,
+    seed: int = 7,
+    threads: int = 0,
+) -> QuantizationPrediction:
+    """
+    Predict whether ``Metric.Uint7_L2`` outperforms ``Metric.Int8_InnerProduct`` from already L2-normalized vectors (**A1+A2**).
+
+    Intended for ``deglib.compress`` / ``deglib.searcher`` / ``deglib.reranker`` when original raw vectors are unavailable.
+    ``is_cosine`` is ``True`` when an ``L2NormalizeTransform`` was attached and ``False`` when inputs were already unit-norm.
+    Non-InnerProduct (L2) datasets unconditionally select ``Metric.Uint7_L2``.
+    """
+    _validate_counts(sample_count, 0, seed, threads)
+    arr = _prepare_vectors(data)
+    cpp_metric = Metric.resolve(metric)._to_cpp_metric()
+    raw = cpp_tuning.predict_quantization_normalized(
+        arr,
+        is_cosine=bool(is_cosine),
+        metric=cpp_metric,
+        sample_count=int(sample_count),
+        seed=int(seed),
+        threads=int(threads),
+    )
     return QuantizationPrediction(
         metric=Metric(int(raw.metric)),
         uint7_advantage_pct=float(raw.uint7_advantage_pct),
@@ -241,4 +278,5 @@ __all__ = [
     "measure_dataset_profile",
     "predict_optimization_target",
     "predict_quantization",
+    "predict_quantization_normalized",
 ]

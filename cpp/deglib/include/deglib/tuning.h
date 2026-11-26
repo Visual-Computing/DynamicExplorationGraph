@@ -101,28 +101,58 @@ struct TargetModelCalibration {
 inline constexpr TargetModelCalibration kDefaultTargetCalibration{};
 
 /**
- * Linear z-score calibration constants predicting log2(QPS_Uint7_L2 / QPS_Int8_InnerProduct)
- * for InnerProduct/Cosine datasets. L2/Euclidean datasets unconditionally use Uint7_L2.
+ * Calibration constants for the K5-Top raw-vector quantization predictor (deglib.build).
  *
- * Fitted via Ridge regression (lambda=0.1) on 16k-sample profile features against
- * recall-weighted (>=0.95 prioritized) Pareto QPS advantage across the 13 InnerProduct/Cosine VIBE datasets.
+ * Predicts log2(QPS_Uint7_L2 / QPS_Int8_InnerProduct) via z-score + symmetric tanh (T=2.5, lambda=0.05)
+ * from 5 features: coord_pos_frac, d1_tail_weight (on S), km16_var_expl (on S[:2000]),
+ * log1p_mips_extra_ratio (from raw vector norms), and top32_var_ratio (on centered raw X[:4000]).
+ *
+ * Verified across 13 InnerProduct VIBE datasets x 10 seeds (sample_count=16000):
+ * - 12-dataset fit (excluding arxiv-nomic tie): 12/12 LOO, 13/13 10-seed stable, rho=0.9580, RMSE=0.0525.
+ * - 13-dataset evaluation: 12/12 LOO, 13/13 10-seed stable, rho=0.8352, RMSE=0.0552.
+ *
+ * Use this model in deglib.build(..., compress="8bit") where raw unnormalized vectors x are available.
+ * Do NOT use it on already L2-normalized 32-bit graph vectors (||x|| == 1), where it degrades to 9/12 LOO;
+ * use NormalizedQuantizationCalibration / predict_quantization_normalized (A1+A2) instead.
  */
-struct QuantizationModelCalibration {
-    double mu_dim_over_participation = 26311.8692307692;
-    double mu_hadamard_kurt = -0.0053076923;
-    double mu_log_dim_over_part = 8.5775828244;
-
-    double sd_dim_over_participation = 52291.5997452802;
-    double sd_hadamard_kurt = 0.0712270310;
-    double sd_log_dim_over_part = 1.8612986356;
-
-    double w_intercept = 0.0582410964;
-    double w_dim_over_participation = 0.1174640890;
-    double w_hadamard_kurt = -0.0233602272;
-    double w_log_dim_over_part = -0.0866130095;
+struct K5QuantizationCalibration {
+    double mu[5] = {0.451962508742, 1.01575590266, 0.056276651577, 0.290925029357, 0.430163613707};
+    double sd[5] = {0.10597489595, 0.198663404925, 0.084832199336, 0.408868756066, 0.120893466906};
+    double w[6] = {0.069528367635, 0.106903931192, -0.084378382048, 0.236850492395, 0.294950166115, -0.087842345105};
+    double tanh_temp = 2.5;
 };
 
-inline constexpr QuantizationModelCalibration kDefaultQuantizationCalibration{};
+inline constexpr K5QuantizationCalibration kDefaultK5QuantizationCalibration{};
+
+/**
+ * Calibration constants for the A1+A2 L2-normalization-invariant quantization ensemble (deglib.compress).
+ *
+ * Averages two 5-feature Ridge models (A1 with lambda=0.02, A2 with lambda=0.005) fitted on all
+ * 13 InnerProduct VIBE datasets x 10 seeds (including arxiv-nomic):
+ * - A1: mle_lid16_tail, rc_1_32, log1p(km16_ch_index), s_eig_pr_abs, is_cosine
+ * - A2: d1_skew, log1p(km16_ch_index), s_top1_var_ratio, s_top10_var_ratio, is_cosine
+ *
+ * Every feature is 100% invariant to per-vector L2 normalization. `is_cosine` (1.0 if an
+ * L2NormalizeTransform was attached to the graph, 0.0 if input vectors were already normalized)
+ * is preserved on 32-bit graphs and passed explicitly.
+ *
+ * Verified in C++ across 13 InnerProduct VIBE datasets x 10 seeds:
+ * 12/12 LOO, 13/13 10-seed stable, rho=0.8736, RMSE=0.0660.
+ *
+ * Use this model in deglib.compress(graph, compress="8bit") when original raw vectors are no longer
+ * available and only already-normalized 32-bit graph vectors remain.
+ */
+struct NormalizedQuantizationCalibration {
+    double mu1[5] = {2.094364033259, 1.607992305533, 1.38352234172, 106.583545230518, 0.384615384615};
+    double sd1[5] = {0.173713904065, 0.185177378713, 1.462685812064, 55.729987183483, 0.486504255411};
+    double w1[6] = {0.058241096438, 0.032304031315, -0.069819157704, 0.155771124155, 0.105924348051, 0.142014595245};
+
+    double mu2[5] = {-0.606555704009, 1.38352234172, 0.061350359796, 0.248731304815, 0.384615384615};
+    double sd2[5] = {0.696227543675, 1.462685812064, 0.042617357279, 0.098138232838, 0.486504255411};
+    double w2[6] = {0.058241096438, -0.051024756716, 0.1273745551, 0.12126984743, -0.180407863562, 0.102825619064};
+};
+
+inline constexpr NormalizedQuantizationCalibration kDefaultNormalizedQuantizationCalibration{};
 
 namespace detail {
 
@@ -1021,6 +1051,713 @@ inline DatasetProfile measure_profile_from_sampled(
     return profile;
 }
 
+inline void jacobi_eigenvalues_sym(std::vector<double>& a, size_t n, std::vector<double>& evals) {
+    evals.resize(n);
+    for (size_t iter = 0; iter < 60 * n * n; ++iter) {
+        size_t p = 0, q = 1;
+        double max_off = 0.0;
+        for (size_t i = 0; i < n; ++i) {
+            for (size_t j = i + 1; j < n; ++j) {
+                const double v = std::abs(a[i * n + j]);
+                if (v > max_off) {
+                    max_off = v;
+                    p = i;
+                    q = j;
+                }
+            }
+        }
+        if (max_off < 1e-12) break;
+        const double app = a[p * n + p];
+        const double aqq = a[q * n + q];
+        const double apq = a[p * n + q];
+        const double tau = (aqq - app) / (2.0 * apq);
+        const double t = (tau >= 0.0) ? (1.0 / (tau + std::sqrt(1.0 + tau * tau)))
+                                      : (-1.0 / (-tau + std::sqrt(1.0 + tau * tau)));
+        const double c = 1.0 / std::sqrt(1.0 + t * t);
+        const double s = t * c;
+        a[p * n + p] = app - t * apq;
+        a[q * n + q] = aqq + t * apq;
+        a[p * n + q] = 0.0;
+        a[q * n + p] = 0.0;
+        for (size_t k = 0; k < n; ++k) {
+            if (k == p || k == q) continue;
+            const double akp = a[k * n + p];
+            const double akq = a[k * n + q];
+            a[k * n + p] = a[p * n + k] = c * akp - s * akq;
+            a[k * n + q] = a[q * n + k] = s * akp + c * akq;
+        }
+    }
+    for (size_t i = 0; i < n; ++i) evals[i] = a[i * n + i];
+    std::sort(evals.begin(), evals.end(), std::greater<double>());
+}
+
+inline void mgs_orthonormalize(std::vector<float>& q, size_t rows, size_t cols) {
+    for (size_t j = 0; j < cols; ++j) {
+        for (size_t k = 0; k < j; ++k) {
+            double dot = 0.0;
+            for (size_t i = 0; i < rows; ++i) {
+                dot += static_cast<double>(q[i * cols + j]) * static_cast<double>(q[i * cols + k]);
+            }
+            const float fdot = static_cast<float>(dot);
+            for (size_t i = 0; i < rows; ++i) {
+                q[i * cols + j] -= fdot * q[i * cols + k];
+            }
+        }
+        double n2 = 0.0;
+        for (size_t i = 0; i < rows; ++i) {
+            const double v = static_cast<double>(q[i * cols + j]);
+            n2 += v * v;
+        }
+        const float inv = (n2 > 1e-24) ? static_cast<float>(1.0 / std::sqrt(n2)) : 0.0f;
+        for (size_t i = 0; i < rows; ++i) {
+            q[i * cols + j] *= inv;
+        }
+    }
+}
+
+// L2-normalize sampled rows into `S`; optionally count positive raw coordinates and record raw norms.
+inline double normalize_rows_l2(
+    const float* data,
+    size_t n,
+    uint32_t dim,
+    size_t threads,
+    std::vector<float>& S,
+    std::vector<float>* out_norms,
+    bool count_pos
+) {
+    S.resize(n * dim);
+    if (out_norms) out_norms->resize(n);
+    std::vector<uint64_t> pos_counts(threads, 0);
+
+    deglib::concurrent::parallel_batch_for(
+        size_t{0}, n, threads,
+        [&](size_t begin, size_t end, size_t tid) {
+            uint64_t pc = 0;
+            for (size_t i = begin; i < end; ++i) {
+                const float* src = data + i * dim;
+                float* dst = S.data() + i * dim;
+                double n2 = 0.0;
+                for (uint32_t d = 0; d < dim; ++d) {
+                    const float v = src[d];
+                    if (count_pos && v > 0.0f) ++pc;
+                    n2 += static_cast<double>(v) * static_cast<double>(v);
+                }
+                const float nm = static_cast<float>(std::sqrt(n2));
+                if (out_norms) (*out_norms)[i] = nm;
+                const float inv = (nm > 1e-12f) ? (1.0f / nm) : 0.0f;
+                for (uint32_t d = 0; d < dim; ++d) dst[d] = src[d] * inv;
+            }
+            pos_counts[tid] += pc;
+        },
+        16
+    );
+    if (!count_pos) return 0.0;
+    uint64_t tot = 0;
+    for (uint64_t c : pos_counts) tot += c;
+    return static_cast<double>(tot) / static_cast<double>(n * static_cast<size_t>(dim));
+}
+
+// Blocked AVX2 SGEMM top-k_nn Euclidean distances on L2-normalized S (returns sorted ascending per row).
+inline void knn_dists_on_normalized(
+    const std::vector<float>& S,
+    size_t n,
+    uint32_t dim,
+    size_t k_nn,
+    size_t threads,
+    std::vector<float>& out_dists
+) {
+    const GemmPanelFn gemm_panel_fn = resolve_gemm_panel_fn();
+    deglib::distances::FloatSpace l2_space(dim, deglib::distances::Metric::FP32_L2);
+    const auto dist_func = l2_space.get_dist_func();
+    const void* param = l2_space.get_dist_func_param();
+    const float tol_factor = (std::max)(2e-3f, static_cast<float>(dim) * 1e-6f);
+    const size_t num_q_tiles = (n + kTileM - 1) / kTileM;
+    const size_t actual_threads = (std::min)(threads, num_q_tiles);
+    std::vector<TileScratch> scratch(actual_threads);
+    out_dists.assign(n * k_nn, (std::numeric_limits<float>::infinity)());
+
+    deglib::concurrent::parallel_batch_for(
+        size_t{0}, num_q_tiles, actual_threads,
+        [&](size_t begin, size_t end, size_t tid) {
+            TileScratch& sc = scratch[tid];
+            std::vector<float> row_d2(kTileM * k_nn);
+            for (size_t qt = begin; qt < end; ++qt) {
+                const size_t i0 = qt * kTileM;
+                const size_t bm = (std::min)(kTileM, n - i0);
+                const size_t bm_pad = (bm + 3) & ~size_t{3};
+                std::fill(row_d2.begin(), row_d2.end(), (std::numeric_limits<float>::infinity)());
+                float kth_d2[kTileM];
+                std::fill_n(kth_d2, bm, (std::numeric_limits<float>::infinity)());
+
+                for (size_t j0 = 0; j0 < n; j0 += kTileN) {
+                    const size_t bn = (std::min)(kTileN, n - j0);
+                    const size_t bn_pad = (bn + 3) & ~size_t{3};
+                    std::fill_n(sc.c_tile.data(), bm_pad * kTileN, 0.0f);
+                    for (size_t k0 = 0; k0 < dim; k0 += kTileK) {
+                        const size_t bk = (std::min)(static_cast<size_t>(dim) - k0, kTileK);
+                        const size_t bk_pad = (bk + 15) & ~size_t{15};
+                        pack_panel(S.data(), dim, i0, bm, k0, bk, bm_pad, bk_pad, sc.a_panel.data());
+                        pack_panel(S.data(), dim, j0, bn, k0, bk, bn_pad, bk_pad, sc.b_panel.data());
+                        gemm_panel_fn(sc.a_panel.data(), bm_pad, sc.b_panel.data(), bn_pad, bk_pad, sc.c_tile.data());
+                    }
+                    for (size_t r = 0; r < bm; ++r) {
+                        const size_t qi = i0 + r;
+                        float* rd = row_d2.data() + r * k_nn;
+                        float worst = kth_d2[r];
+                        const float* c_row = sc.c_tile.data() + r * kTileN;
+                        const float* q_ptr = S.data() + qi * dim;
+                        const float err_margin = tol_factor * 2.0f;
+                        for (size_t c = 0; c < bn; ++c) {
+                            const size_t db_row = j0 + c;
+                            if (db_row == qi) continue;
+                            const float d2_approx = 2.0f - 2.0f * c_row[c];
+                            if (d2_approx <= worst + err_margin) {
+                                const float d2 = dist_func(q_ptr, S.data() + db_row * dim, param);
+                                if (d2 < worst) {
+                                    if (k_nn == 1) {
+                                        rd[0] = d2;
+                                        worst = d2;
+                                    } else {
+                                        size_t pos = k_nn - 1;
+                                        while (pos > 0 && rd[pos - 1] > d2) {
+                                            rd[pos] = rd[pos - 1];
+                                            --pos;
+                                        }
+                                        rd[pos] = d2;
+                                        worst = rd[k_nn - 1];
+                                    }
+                                }
+                            }
+                        }
+                        kth_d2[r] = worst;
+                    }
+                }
+                for (size_t r = 0; r < bm; ++r) {
+                    const float* rd = row_d2.data() + r * k_nn;
+                    float* dst = out_dists.data() + (i0 + r) * k_nn;
+                    for (size_t k = 0; k < k_nn; ++k) dst[k] = std::sqrt((std::max)(0.0f, rd[k]));
+                }
+            }
+        },
+        1
+    );
+}
+
+struct SphericalKm16Stats {
+    double var_expl = 0.0;
+    double ch_index = 0.0;
+};
+
+// Spherical 16-means on S[:min(n, 2000)]; k-means++ initialization keeps cluster metrics stable across seeds.
+inline SphericalKm16Stats compute_spherical_km16(const std::vector<float>& S, size_t n, uint32_t dim, uint32_t seed, bool kmeans_pp) {
+    const size_t n_km = (std::min)(n, size_t{2000});
+    constexpr size_t K_KM = 16;
+    if (n_km <= K_KM) return {};
+
+    std::mt19937 km_rng(seed);
+    std::vector<float> cents(K_KM * dim, 0.0f);
+    if (kmeans_pp) {
+        std::uniform_int_distribution<size_t> u0(0, n_km - 1);
+        std::copy_n(S.data() + u0(km_rng) * dim, dim, cents.data());
+        std::vector<double> min_d2(n_km, 1e30);
+        for (size_t c = 1; c < K_KM; ++c) {
+            const float* prev_c = cents.data() + (c - 1) * dim;
+            double sum_d2 = 0.0;
+            for (size_t i = 0; i < n_km; ++i) {
+                const float* row = S.data() + i * dim;
+                double d2 = 0.0;
+                for (uint32_t d = 0; d < dim; ++d) {
+                    const double diff = static_cast<double>(row[d]) - static_cast<double>(prev_c[d]);
+                    d2 += diff * diff;
+                }
+                if (d2 < min_d2[i]) min_d2[i] = d2;
+                sum_d2 += min_d2[i];
+            }
+            size_t chosen = 0;
+            if (sum_d2 > 1e-18) {
+                std::uniform_real_distribution<double> ur(0.0, sum_d2);
+                const double target = ur(km_rng);
+                double acc = 0.0;
+                for (size_t i = 0; i < n_km; ++i) {
+                    acc += min_d2[i];
+                    if (acc >= target) {
+                        chosen = i;
+                        break;
+                    }
+                }
+            } else {
+                chosen = u0(km_rng);
+            }
+            std::copy_n(S.data() + chosen * dim, dim, cents.data() + c * dim);
+        }
+    } else {
+        std::vector<size_t> perm_km(n_km);
+        std::iota(perm_km.begin(), perm_km.end(), size_t{0});
+        for (size_t i = 0; i < K_KM; ++i) {
+            std::uniform_int_distribution<size_t> dist(i, n_km - 1);
+            std::swap(perm_km[i], perm_km[dist(km_rng)]);
+            std::copy_n(S.data() + perm_km[i] * dim, dim, cents.data() + i * dim);
+        }
+    }
+
+    std::vector<uint32_t> lbl(n_km, 0);
+    std::vector<double> new_cents(K_KM * dim, 0.0);
+    std::vector<uint32_t> counts(K_KM, 0);
+    const int iters = kmeans_pp ? 10 : 8;
+    for (int it = 0; it < iters; ++it) {
+        for (size_t i = 0; i < n_km; ++i) {
+            const float* row = S.data() + i * dim;
+            float best_s = -1e30f;
+            uint32_t best_c = 0;
+            for (size_t c = 0; c < K_KM; ++c) {
+                const float* cp = cents.data() + c * dim;
+                float s = 0.0f;
+                for (uint32_t d = 0; d < dim; ++d) s += row[d] * cp[d];
+                if (s > best_s) {
+                    best_s = s;
+                    best_c = static_cast<uint32_t>(c);
+                }
+            }
+            lbl[i] = best_c;
+        }
+        std::fill(new_cents.begin(), new_cents.end(), 0.0);
+        std::fill(counts.begin(), counts.end(), 0);
+        for (size_t i = 0; i < n_km; ++i) {
+            const uint32_t c = lbl[i];
+            ++counts[c];
+            const float* row = S.data() + i * dim;
+            double* dst = new_cents.data() + c * dim;
+            for (uint32_t d = 0; d < dim; ++d) dst[d] += static_cast<double>(row[d]);
+        }
+        for (size_t c = 0; c < K_KM; ++c) {
+            if (counts[c] == 0) continue;
+            float* cp = cents.data() + c * dim;
+            const double* src = new_cents.data() + c * dim;
+            double n2 = 0.0;
+            for (uint32_t d = 0; d < dim; ++d) {
+                const double v = src[d] / static_cast<double>(counts[c]);
+                cp[d] = static_cast<float>(v);
+                n2 += v * v;
+            }
+            const float inv = (n2 > 1e-24) ? static_cast<float>(1.0 / std::sqrt(n2)) : 0.0f;
+            for (uint32_t d = 0; d < dim; ++d) cp[d] *= inv;
+        }
+    }
+
+    std::vector<double> col_mean(dim, 0.0);
+    for (size_t i = 0; i < n_km; ++i) {
+        const float* row = S.data() + i * dim;
+        float best_s = -1e30f;
+        uint32_t best_c = 0;
+        for (size_t c = 0; c < K_KM; ++c) {
+            const float* cp = cents.data() + c * dim;
+            float s = 0.0f;
+            for (uint32_t d = 0; d < dim; ++d) s += row[d] * cp[d];
+            if (s > best_s) {
+                best_s = s;
+                best_c = static_cast<uint32_t>(c);
+            }
+        }
+        lbl[i] = best_c;
+        for (uint32_t d = 0; d < dim; ++d) col_mean[d] += static_cast<double>(row[d]);
+    }
+    for (uint32_t d = 0; d < dim; ++d) col_mean[d] /= static_cast<double>(n_km);
+
+    double tot_var = 0.0, within = 0.0;
+    for (size_t i = 0; i < n_km; ++i) {
+        const float* row = S.data() + i * dim;
+        const float* cp = cents.data() + lbl[i] * dim;
+        for (uint32_t d = 0; d < dim; ++d) {
+            const double dt = static_cast<double>(row[d]) - col_mean[d];
+            const double dw = static_cast<double>(row[d]) - static_cast<double>(cp[d]);
+            tot_var += dt * dt;
+            within += dw * dw;
+        }
+    }
+    const double between = (std::max)(0.0, tot_var - within);
+    SphericalKm16Stats out;
+    out.var_expl = (std::max)(0.0, 1.0 - within / (std::max)(tot_var, 1e-9));
+    out.ch_index = (within > 1e-12) ? (between / (K_KM - 1.0)) / (within / (n_km - K_KM)) : 0.0;
+    return out;
+}
+
+inline void center_submatrix(const float* data, size_t m4, uint32_t dim, std::vector<float>& Xs, double& frob2) {
+    Xs.resize(m4 * dim);
+    std::vector<double> mean_x(dim, 0.0);
+    for (size_t i = 0; i < m4; ++i) {
+        const float* src = data + i * dim;
+        for (uint32_t d = 0; d < dim; ++d) mean_x[d] += static_cast<double>(src[d]);
+    }
+    for (uint32_t d = 0; d < dim; ++d) mean_x[d] /= static_cast<double>(m4);
+    frob2 = 0.0;
+    for (size_t i = 0; i < m4; ++i) {
+        const float* src = data + i * dim;
+        float* dst = Xs.data() + i * dim;
+        for (uint32_t d = 0; d < dim; ++d) {
+            const float v = src[d] - static_cast<float>(mean_x[d]);
+            dst[d] = v;
+            frob2 += static_cast<double>(v) * static_cast<double>(v);
+        }
+    }
+}
+
+inline void subspace_top_ratios(
+    const std::vector<float>& Xs,
+    size_t m4,
+    uint32_t dim,
+    double frob2,
+    size_t r_sub_req,
+    size_t threads,
+    uint32_t seed,
+    double& out_top1,
+    double& out_top10,
+    double& out_top32
+) {
+    const size_t r_sub = (std::min)(static_cast<size_t>(dim), r_sub_req);
+    std::vector<float> Q_sub(dim * r_sub);
+    std::mt19937 sub_rng(seed + 777);
+    std::normal_distribution<float> norm_dist(0.0f, 1.0f);
+    for (float& v : Q_sub) v = norm_dist(sub_rng);
+    mgs_orthonormalize(Q_sub, dim, r_sub);
+
+    std::vector<float> Z_sub(m4 * r_sub, 0.0f);
+    std::vector<std::vector<float>> q_local(threads, std::vector<float>(dim * r_sub, 0.0f));
+    for (int it = 0; it < 6; ++it) {
+        deglib::concurrent::parallel_batch_for(
+            size_t{0}, m4, threads,
+            [&](size_t begin, size_t end, size_t /*tid*/) {
+                for (size_t i = begin; i < end; ++i) {
+                    const float* xrow = Xs.data() + i * dim;
+                    float* zrow = Z_sub.data() + i * r_sub;
+                    std::fill_n(zrow, r_sub, 0.0f);
+                    for (uint32_t d = 0; d < dim; ++d) {
+                        const float xv = xrow[d];
+                        const float* qrow = Q_sub.data() + d * r_sub;
+                        for (size_t c = 0; c < r_sub; ++c) zrow[c] += xv * qrow[c];
+                    }
+                }
+            },
+            16
+        );
+        for (auto& ql : q_local) std::fill(ql.begin(), ql.end(), 0.0f);
+        deglib::concurrent::parallel_batch_for(
+            size_t{0}, m4, threads,
+            [&](size_t begin, size_t end, size_t tid) {
+                float* ql = q_local[tid].data();
+                for (size_t i = begin; i < end; ++i) {
+                    const float* xrow = Xs.data() + i * dim;
+                    const float* zrow = Z_sub.data() + i * r_sub;
+                    for (uint32_t d = 0; d < dim; ++d) {
+                        const float xv = xrow[d];
+                        float* dst = ql + d * r_sub;
+                        for (size_t c = 0; c < r_sub; ++c) dst[c] += xv * zrow[c];
+                    }
+                }
+            },
+            16
+        );
+        std::fill(Q_sub.begin(), Q_sub.end(), 0.0f);
+        for (const auto& ql : q_local) {
+            for (size_t idx = 0; idx < Q_sub.size(); ++idx) Q_sub[idx] += ql[idx];
+        }
+        mgs_orthonormalize(Q_sub, dim, r_sub);
+    }
+    deglib::concurrent::parallel_batch_for(
+        size_t{0}, m4, threads,
+        [&](size_t begin, size_t end, size_t /*tid*/) {
+            for (size_t i = begin; i < end; ++i) {
+                const float* xrow = Xs.data() + i * dim;
+                float* zrow = Z_sub.data() + i * r_sub;
+                std::fill_n(zrow, r_sub, 0.0f);
+                for (uint32_t d = 0; d < dim; ++d) {
+                    const float xv = xrow[d];
+                    const float* qrow = Q_sub.data() + d * r_sub;
+                    for (size_t c = 0; c < r_sub; ++c) zrow[c] += xv * qrow[c];
+                }
+            }
+        },
+        16
+    );
+    std::vector<double> G_sub(r_sub * r_sub, 0.0);
+    for (size_t i = 0; i < m4; ++i) {
+        const float* zrow = Z_sub.data() + i * r_sub;
+        for (size_t a = 0; a < r_sub; ++a) {
+            for (size_t b = a; b < r_sub; ++b) {
+                G_sub[a * r_sub + b] += static_cast<double>(zrow[a]) * static_cast<double>(zrow[b]);
+            }
+        }
+    }
+    for (size_t a = 0; a < r_sub; ++a) {
+        for (size_t b = 0; b < a; ++b) G_sub[a * r_sub + b] = G_sub[b * r_sub + a];
+    }
+    std::vector<double> evals;
+    jacobi_eigenvalues_sym(G_sub, r_sub, evals);
+    const double inv_f = 1.0 / (std::max)(frob2, 1e-18);
+    double s1 = 0.0, s10 = 0.0, s32 = 0.0;
+    for (size_t i = 0; i < r_sub; ++i) {
+        const double ev = (std::max)(0.0, evals[i]);
+        if (i < 1) s1 += ev;
+        if (i < 10) s10 += ev;
+        if (i < 32) s32 += ev;
+    }
+    out_top1 = s1 * inv_f;
+    out_top10 = s10 * inv_f;
+    out_top32 = s32 * inv_f;
+}
+
+inline double compute_eig_pr_gram(const std::vector<float>& Xs, size_t m4, uint32_t dim, double frob2, size_t threads) {
+    const GemmPanelFn gemm_panel_fn = resolve_gemm_panel_fn();
+    const size_t num_q_tiles = (m4 + kTileM - 1) / kTileM;
+    const size_t actual_threads = (std::min)(threads, num_q_tiles);
+    std::vector<TileScratch> scratch(actual_threads);
+    std::vector<double> sum_sq(actual_threads, 0.0);
+
+    deglib::concurrent::parallel_batch_for(
+        size_t{0}, num_q_tiles, actual_threads,
+        [&](size_t begin, size_t end, size_t tid) {
+            TileScratch& sc = scratch[tid];
+            double local_sq = 0.0;
+            for (size_t qt = begin; qt < end; ++qt) {
+                const size_t i0 = qt * kTileM;
+                const size_t bm = (std::min)(kTileM, m4 - i0);
+                const size_t bm_pad = (bm + 3) & ~size_t{3};
+                for (size_t j0 = i0; j0 < m4; j0 += kTileN) {
+                    const size_t bn = (std::min)(kTileN, m4 - j0);
+                    const size_t bn_pad = (bn + 3) & ~size_t{3};
+                    std::fill_n(sc.c_tile.data(), bm_pad * kTileN, 0.0f);
+                    for (size_t k0 = 0; k0 < dim; k0 += kTileK) {
+                        const size_t bk = (std::min)(static_cast<size_t>(dim) - k0, kTileK);
+                        const size_t bk_pad = (bk + 15) & ~size_t{15};
+                        pack_panel(Xs.data(), dim, i0, bm, k0, bk, bm_pad, bk_pad, sc.a_panel.data());
+                        pack_panel(Xs.data(), dim, j0, bn, k0, bk, bn_pad, bk_pad, sc.b_panel.data());
+                        gemm_panel_fn(sc.a_panel.data(), bm_pad, sc.b_panel.data(), bn_pad, bk_pad, sc.c_tile.data());
+                    }
+                    const double weight = (j0 == i0) ? 1.0 : 2.0;
+                    for (size_t r = 0; r < bm; ++r) {
+                        const float* c_row = sc.c_tile.data() + r * kTileN;
+                        for (size_t c = 0; c < bn; ++c) {
+                            const double v = static_cast<double>(c_row[c]);
+                            local_sq += weight * v * v;
+                        }
+                    }
+                }
+            }
+            sum_sq[tid] += local_sq;
+        },
+        1
+    );
+    double tot_sq = 0.0;
+    for (double s : sum_sq) tot_sq += s;
+    return (frob2 * frob2) / (std::max)(tot_sq, 1e-18);
+}
+
+inline std::vector<float> sample_fp32_rows(std::span<const float> data, uint32_t dim, size_t sample_count, uint32_t seed) {
+    const size_t total_rows = data.size() / dim;
+    const size_t n = (sample_count == 0 || sample_count >= total_rows) ? total_rows : sample_count;
+    const std::vector<size_t> indices = sample_distinct_indices(total_rows, n, seed);
+    std::vector<float> sampled(indices.size() * static_cast<size_t>(dim));
+    const size_t row_bytes = static_cast<size_t>(dim) * sizeof(float);
+    for (size_t i = 0; i < indices.size(); ++i) {
+        std::memcpy(sampled.data() + i * dim, data.data() + indices[i] * dim, row_bytes);
+    }
+    return sampled;
+}
+
+inline std::vector<float> sample_fp16_rows(std::span<const uint16_t> data_fp16, uint32_t dim, size_t sample_count, uint32_t seed) {
+    const size_t total_rows = data_fp16.size() / dim;
+    const size_t n = (sample_count == 0 || sample_count >= total_rows) ? total_rows : sample_count;
+    const std::vector<size_t> indices = sample_distinct_indices(total_rows, n, seed);
+    std::vector<float> sampled(indices.size() * static_cast<size_t>(dim));
+    for (size_t i = 0; i < indices.size(); ++i) {
+        deglib::distances::fp16::fp16_to_floats(data_fp16.data() + indices[i] * dim, sampled.data() + i * dim, dim);
+    }
+    return sampled;
+}
+
+inline QuantizationPrediction predict_quantization_k5_from_sampled(
+    const std::vector<float>& sampled,
+    uint32_t dim,
+    deglib::distances::Metric metric,
+    uint32_t seed,
+    size_t num_threads,
+    const K5QuantizationCalibration& cal
+) {
+    const size_t n = sampled.size() / dim;
+    DatasetProfile prof{};
+    prof.sample_count = static_cast<uint32_t>(n);
+    prof.dim = dim;
+    prof.metric = metric;
+
+    if (metric.get_distance_kind() != deglib::distances::MetricDistanceKind::InnerProduct || n < 2) {
+        return QuantizationPrediction{deglib::distances::Metric::Uint7_L2, 0.0f, prof};
+    }
+
+    const size_t threads = resolve_thread_count(num_threads);
+    std::vector<float> norms;
+    std::vector<float> S;
+    const double coord_pos_frac = normalize_rows_l2(sampled.data(), n, dim, threads, S, &norms, true);
+
+    double sum_norm = 0.0;
+    float max_norm = 0.0f;
+    for (float nm : norms) {
+        sum_norm += static_cast<double>(nm);
+        if (nm > max_norm) max_norm = nm;
+    }
+    if (max_norm <= 1e-12f) {
+        return QuantizationPrediction{deglib::distances::Metric::Uint7_L2, 0.0f, prof};
+    }
+    const double mean_norm = sum_norm / static_cast<double>(n);
+    const double M = static_cast<double>(max_norm) * 1.0001;
+    double sum_extra = 0.0;
+    for (float nm : norms) {
+        const double ex2 = (std::max)(0.0, M * M - static_cast<double>(nm) * static_cast<double>(nm));
+        sum_extra += std::sqrt(ex2);
+    }
+    const double mips_extra_ratio = (sum_extra / static_cast<double>(n)) / (std::max)(mean_norm, 1e-9);
+    const double log1p_mips_extra_ratio = std::log1p((std::max)(mips_extra_ratio, 0.0));
+
+    std::vector<float> d1_f;
+    knn_dists_on_normalized(S, n, dim, 1, threads, d1_f);
+    std::vector<double> d1_vals(n);
+    double sum_d1 = 0.0;
+    for (size_t i = 0; i < n; ++i) {
+        d1_vals[i] = static_cast<double>(d1_f[i]);
+        sum_d1 += d1_vals[i];
+    }
+    if (sum_d1 <= 1e-12 * static_cast<double>(n)) {
+        return QuantizationPrediction{deglib::distances::Metric::Uint7_L2, 0.0f, prof};
+    }
+    std::sort(d1_vals.begin(), d1_vals.end());
+    const double d1_p25 = sorted_percentile(d1_vals, 0.25);
+    const double d1_p50 = sorted_percentile(d1_vals, 0.50);
+    const double d1_p75 = sorted_percentile(d1_vals, 0.75);
+    const double d1_p95 = sorted_percentile(d1_vals, 0.95);
+    const double d1_tail_weight = (d1_p95 - d1_p50) / (std::max)(d1_p75 - d1_p25, 1e-9);
+
+    const double km16_var_expl = compute_spherical_km16(S, n, dim, seed, false).var_expl;
+
+    const size_t m4 = (std::min)(n, size_t{4000});
+    std::vector<float> Xs;
+    double frob2 = 0.0;
+    center_submatrix(sampled.data(), m4, dim, Xs, frob2);
+    if (frob2 <= 1e-12) {
+        return QuantizationPrediction{deglib::distances::Metric::Uint7_L2, 0.0f, prof};
+    }
+    double t1_r = 0.0, t10_r = 0.0, top32_var_ratio = 0.0;
+    subspace_top_ratios(Xs, m4, dim, frob2, 44, threads, seed, t1_r, t10_r, top32_var_ratio);
+
+    const double raw_f[5] = {coord_pos_frac, d1_tail_weight, km16_var_expl, log1p_mips_extra_ratio, top32_var_ratio};
+    double log2_score = cal.w[0];
+    for (int i = 0; i < 5; ++i) {
+        log2_score += cal.w[i + 1] * std::tanh(((raw_f[i] - cal.mu[i]) / cal.sd[i]) / cal.tanh_temp);
+    }
+    const float adv_pct = static_cast<float>((std::exp2(log2_score) - 1.0) * 100.0);
+    const auto q_metric = (adv_pct >= 0.0f) ? deglib::distances::Metric::Uint7_L2 : deglib::distances::Metric::Int8_InnerProduct;
+    return QuantizationPrediction{q_metric, adv_pct, prof};
+}
+
+inline QuantizationPrediction predict_quantization_a1a2_from_sampled(
+    const std::vector<float>& sampled,
+    uint32_t dim,
+    bool is_cosine,
+    deglib::distances::Metric metric,
+    uint32_t seed,
+    size_t num_threads,
+    const NormalizedQuantizationCalibration& cal
+) {
+    const size_t n = sampled.size() / dim;
+    DatasetProfile prof{};
+    prof.sample_count = static_cast<uint32_t>(n);
+    prof.dim = dim;
+    prof.metric = metric;
+
+    if (metric.get_distance_kind() != deglib::distances::MetricDistanceKind::InnerProduct || n < 33) {
+        return QuantizationPrediction{deglib::distances::Metric::Uint7_L2, 0.0f, prof};
+    }
+
+    const size_t threads = resolve_thread_count(num_threads);
+    std::vector<float> S;
+    normalize_rows_l2(sampled.data(), n, dim, threads, S, nullptr, false);
+
+    std::vector<float> knn_d;
+    knn_dists_on_normalized(S, n, dim, 32, threads, knn_d);
+
+    std::vector<double> d1_vals(n);
+    std::vector<double> lid16_vals(n);
+    double sum_d1 = 0.0;
+    for (size_t i = 0; i < n; ++i) {
+        const float* row = knn_d.data() + i * 32;
+        const double d1 = static_cast<double>(row[0]);
+        d1_vals[i] = d1;
+        sum_d1 += d1;
+        const double d16 = (std::max)(static_cast<double>(row[15]), 1e-12);
+        double log_sum = 0.0;
+        for (size_t j = 0; j < 15; ++j) {
+            const double dj = (std::max)(static_cast<double>(row[j]), 1e-12);
+            log_sum += std::log(dj / d16);
+        }
+        const double mean_log = (std::min)(-1e-6, log_sum / 15.0);
+        lid16_vals[i] = -1.0 / mean_log;
+    }
+    const double mean_d1 = sum_d1 / static_cast<double>(n);
+    if (mean_d1 <= 1e-12) {
+        return QuantizationPrediction{deglib::distances::Metric::Uint7_L2, 0.0f, prof};
+    }
+    double m2 = 0.0, m3 = 0.0;
+    for (double v : d1_vals) {
+        const double c = v - mean_d1;
+        m2 += c * c;
+        m3 += c * c * c;
+    }
+    m2 /= static_cast<double>(n);
+    m3 /= static_cast<double>(n);
+    const double d1_skew = (m2 > 1e-18) ? (m3 / std::pow(m2, 1.5)) : 0.0;
+
+    std::sort(lid16_vals.begin(), lid16_vals.end());
+    const double mle_lid16_tail = sorted_percentile(lid16_vals, 0.95) / (std::max)(sorted_percentile(lid16_vals, 0.50), 1e-12);
+
+    deglib::distances::FloatSpace l2_space(dim, deglib::distances::Metric::FP32_L2);
+    const auto dist_func = l2_space.get_dist_func();
+    const void* param = l2_space.get_dist_func_param();
+    std::mt19937_64 rng_rand(seed);
+    std::uniform_int_distribution<size_t> udist(0, n - 1);
+    double sum_drand = 0.0;
+    for (size_t p = 0; p < kDefaultRandomPairs; ++p) {
+        const size_t a = udist(rng_rand);
+        const size_t b = udist(rng_rand);
+        const float d2 = dist_func(S.data() + a * dim, S.data() + b * dim, param);
+        sum_drand += std::sqrt(static_cast<double>((std::max)(0.0f, d2)));
+    }
+    const double rc_1_32 = (sum_drand / static_cast<double>(kDefaultRandomPairs)) / (std::max)(mean_d1, 1e-12);
+
+    const double ch = compute_spherical_km16(S, n, dim, seed, true).ch_index;
+    const double log1p_ch = std::log1p((std::max)(0.0, ch));
+
+    const size_t m4 = (std::min)(n, size_t{4000});
+    std::vector<float> Xs;
+    double frob2 = 0.0;
+    center_submatrix(S.data(), m4, dim, Xs, frob2);
+    if (frob2 <= 1e-12) {
+        return QuantizationPrediction{deglib::distances::Metric::Uint7_L2, 0.0f, prof};
+    }
+    const double s_eig_pr_abs = compute_eig_pr_gram(Xs, m4, dim, frob2, threads);
+    double s_top1 = 0.0, s_top10 = 0.0, s_top32 = 0.0;
+    subspace_top_ratios(Xs, m4, dim, frob2, 16, threads, seed, s_top1, s_top10, s_top32);
+
+    const double cos_f = is_cosine ? 1.0 : 0.0;
+    const double f1[5] = {mle_lid16_tail, rc_1_32, log1p_ch, s_eig_pr_abs, cos_f};
+    const double f2[5] = {d1_skew, log1p_ch, s_top1, s_top10, cos_f};
+    double s1 = cal.w1[0], s2 = cal.w2[0];
+    for (int i = 0; i < 5; ++i) {
+        s1 += cal.w1[i + 1] * ((f1[i] - cal.mu1[i]) / cal.sd1[i]);
+        s2 += cal.w2[i + 1] * ((f2[i] - cal.mu2[i]) / cal.sd2[i]);
+    }
+    const double log2_score = std::clamp(0.5 * (s1 + s2), -10.0, 10.0);
+    const float adv_pct = static_cast<float>((std::exp2(log2_score) - 1.0) * 100.0);
+    const auto q_metric = (adv_pct >= 0.0f) ? deglib::distances::Metric::Uint7_L2 : deglib::distances::Metric::Int8_InnerProduct;
+    return QuantizationPrediction{q_metric, adv_pct, prof};
+}
+
 }  // namespace detail
 
 /**
@@ -1153,67 +1890,128 @@ predict_optimization_target(const DatasetProfile& profile, const TargetModelCali
 }
 
 /**
- * Predict whether Metric::Uint7_L2 outperforms Metric::Int8_InnerProduct from a precomputed DatasetProfile.
+ * Predict the optimal quantizer metric (Uint7_L2 vs Int8_InnerProduct) from raw, unnormalized FP32 vectors
+ * using the K5-Top model (intended for `deglib.build(..., compress="8bit")`).
  *
- * Non-InnerProduct (L2) datasets unconditionally select Metric::Uint7_L2 because Int8_InnerProduct
- * does not preserve Euclidean ranking without norm augmentation.
- */
-[[nodiscard]] inline QuantizationPrediction
-predict_quantization(const DatasetProfile& profile, const QuantizationModelCalibration& cal = kDefaultQuantizationCalibration) noexcept {
-    if (profile.metric.get_distance_kind() != deglib::distances::MetricDistanceKind::InnerProduct) {
-        return QuantizationPrediction{deglib::distances::Metric::Uint7_L2, 0.0f, profile};
-    }
-    if (profile.sample_count < 2 || profile.dim == 0 || profile.participation_ratio <= 0.0f ||
-        !std::isfinite(profile.participation_ratio) || !std::isfinite(profile.hadamard_kurt)) {
-        return QuantizationPrediction{deglib::distances::Metric::Uint7_L2, 0.0f, profile};
-    }
-
-    const double dim_over_part = static_cast<double>(profile.dim) / static_cast<double>(profile.participation_ratio);
-    const double z_dim_part = (dim_over_part - cal.mu_dim_over_participation) / cal.sd_dim_over_participation;
-    const double z_hkurt = (static_cast<double>(profile.hadamard_kurt) - cal.mu_hadamard_kurt) / cal.sd_hadamard_kurt;
-    const double z_log_dim_part = (std::log(dim_over_part) - cal.mu_log_dim_over_part) / cal.sd_log_dim_over_part;
-
-    const double log2_score = std::clamp(
-        cal.w_intercept + cal.w_dim_over_participation * z_dim_part + cal.w_hadamard_kurt * z_hkurt + cal.w_log_dim_over_part * z_log_dim_part,
-        -10.0, 10.0
-    );
-    const float adv_pct = static_cast<float>((std::exp2(log2_score) - 1.0) * 100.0);
-    const auto metric = (adv_pct >= 0.0f) ? deglib::distances::Metric::Uint7_L2 : deglib::distances::Metric::Int8_InnerProduct;
-    return QuantizationPrediction{metric, adv_pct, profile};
-}
-
-/**
- * Measure a DatasetProfile and predict the optimal quantizer metric (Uint7_L2 vs Int8_InnerProduct) from FP32 vectors.
+ * Non-InnerProduct (L2) datasets unconditionally select Metric::Uint7_L2.
+ * Do NOT pass already L2-normalized 32-bit graph vectors here (K5-Top relies on raw vector norms via
+ * `log1p_mips_extra_ratio` and raw covariance via `top32_var_ratio`); use `predict_quantization_normalized`
+ * for `deglib.compress(graph, compress="8bit")` instead.
  */
 [[nodiscard]] inline QuantizationPrediction predict_quantization(
     std::span<const float> data,
     uint32_t dim,
     deglib::distances::Metric metric = deglib::distances::Metric::FP32_L2,
     size_t sample_count = kDefaultSampleCount,
-    size_t query_count = kDefaultQueryCount,
+    size_t /*query_count*/ = kDefaultQueryCount,
     uint32_t seed = kDefaultSeed,
     size_t num_threads = 0,
-    const QuantizationModelCalibration& cal = kDefaultQuantizationCalibration
+    const K5QuantizationCalibration& cal = kDefaultK5QuantizationCalibration
 ) {
-    const DatasetProfile profile = measure_dataset_profile(data, dim, metric, sample_count, query_count, seed, num_threads);
-    return predict_quantization(profile, cal);
+    if (dim == 0) {
+        throw std::invalid_argument("predict_quantization: dim must be greater than 0");
+    }
+    if (data.size() % dim != 0) {
+        throw std::invalid_argument("predict_quantization: data size must be an exact multiple of dim");
+    }
+    const size_t total_rows = data.size() / dim;
+    if (metric.get_distance_kind() != deglib::distances::MetricDistanceKind::InnerProduct || total_rows < 2) {
+        DatasetProfile prof{static_cast<uint32_t>(total_rows), dim, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, metric};
+        return QuantizationPrediction{deglib::distances::Metric::Uint7_L2, 0.0f, prof};
+    }
+    const std::vector<float> sampled = detail::sample_fp32_rows(data, dim, sample_count, seed);
+    return detail::predict_quantization_k5_from_sampled(sampled, dim, metric, seed, num_threads, cal);
 }
 
 /**
- * Measure a DatasetProfile and predict the optimal quantizer metric (Uint7_L2 vs Int8_InnerProduct) from FP16 vectors.
+ * Predict the optimal quantizer metric (Uint7_L2 vs Int8_InnerProduct) from raw, unnormalized FP16 vectors
+ * using the K5-Top model (intended for `deglib.build(..., compress="8bit")`).
  */
 [[nodiscard]] inline QuantizationPrediction predict_quantization(
     std::span<const uint16_t> data_fp16,
     uint32_t dim,
     deglib::distances::Metric metric = deglib::distances::Metric::FP32_L2,
     size_t sample_count = kDefaultSampleCount,
-    size_t query_count = kDefaultQueryCount,
+    size_t /*query_count*/ = kDefaultQueryCount,
     uint32_t seed = kDefaultSeed,
     size_t num_threads = 0,
-    const QuantizationModelCalibration& cal = kDefaultQuantizationCalibration
+    const K5QuantizationCalibration& cal = kDefaultK5QuantizationCalibration
 ) {
-    const DatasetProfile profile = measure_dataset_profile(data_fp16, dim, metric, sample_count, query_count, seed, num_threads);
-    return predict_quantization(profile, cal);
+    if (dim == 0) {
+        throw std::invalid_argument("predict_quantization: dim must be greater than 0");
+    }
+    if (data_fp16.size() % dim != 0) {
+        throw std::invalid_argument("predict_quantization: data size must be an exact multiple of dim");
+    }
+    const size_t total_rows = data_fp16.size() / dim;
+    if (metric.get_distance_kind() != deglib::distances::MetricDistanceKind::InnerProduct || total_rows < 2) {
+        DatasetProfile prof{static_cast<uint32_t>(total_rows), dim, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, metric};
+        return QuantizationPrediction{deglib::distances::Metric::Uint7_L2, 0.0f, prof};
+    }
+    const std::vector<float> sampled = detail::sample_fp16_rows(data_fp16, dim, sample_count, seed);
+    return detail::predict_quantization_k5_from_sampled(sampled, dim, metric, seed, num_threads, cal);
+}
+
+/**
+ * Predict the optimal quantizer metric (Uint7_L2 vs Int8_InnerProduct) from already L2-normalized FP32 vectors
+ * (e.g., extracted from an existing 32-bit graph during `deglib.compress(graph, compress="8bit")`)
+ * using the 100% L2-normalization-invariant A1+A2 ensemble.
+ *
+ * @param is_cosine true if the graph carries an L2NormalizeTransform (original inputs were unnormalized cosine);
+ *                  false if inputs were already unit-normalized.
+ */
+[[nodiscard]] inline QuantizationPrediction predict_quantization_normalized(
+    std::span<const float> data,
+    uint32_t dim,
+    bool is_cosine,
+    deglib::distances::Metric metric = deglib::distances::Metric::FP32_InnerProduct,
+    size_t sample_count = kDefaultSampleCount,
+    uint32_t seed = kDefaultSeed,
+    size_t num_threads = 0,
+    const NormalizedQuantizationCalibration& cal = kDefaultNormalizedQuantizationCalibration
+) {
+    if (dim == 0) {
+        throw std::invalid_argument("predict_quantization_normalized: dim must be greater than 0");
+    }
+    if (data.size() % dim != 0) {
+        throw std::invalid_argument("predict_quantization_normalized: data size must be an exact multiple of dim");
+    }
+    const size_t total_rows = data.size() / dim;
+    if (metric.get_distance_kind() != deglib::distances::MetricDistanceKind::InnerProduct || total_rows < 33) {
+        DatasetProfile prof{static_cast<uint32_t>(total_rows), dim, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, metric};
+        return QuantizationPrediction{deglib::distances::Metric::Uint7_L2, 0.0f, prof};
+    }
+    const std::vector<float> sampled = detail::sample_fp32_rows(data, dim, sample_count, seed);
+    return detail::predict_quantization_a1a2_from_sampled(sampled, dim, is_cosine, metric, seed, num_threads, cal);
+}
+
+/**
+ * Predict the optimal quantizer metric (Uint7_L2 vs Int8_InnerProduct) from already L2-normalized FP16 vectors
+ * using the 100% L2-normalization-invariant A1+A2 ensemble.
+ */
+[[nodiscard]] inline QuantizationPrediction predict_quantization_normalized(
+    std::span<const uint16_t> data_fp16,
+    uint32_t dim,
+    bool is_cosine,
+    deglib::distances::Metric metric = deglib::distances::Metric::FP32_InnerProduct,
+    size_t sample_count = kDefaultSampleCount,
+    uint32_t seed = kDefaultSeed,
+    size_t num_threads = 0,
+    const NormalizedQuantizationCalibration& cal = kDefaultNormalizedQuantizationCalibration
+) {
+    if (dim == 0) {
+        throw std::invalid_argument("predict_quantization_normalized: dim must be greater than 0");
+    }
+    if (data_fp16.size() % dim != 0) {
+        throw std::invalid_argument("predict_quantization_normalized: data size must be an exact multiple of dim");
+    }
+    const size_t total_rows = data_fp16.size() / dim;
+    if (metric.get_distance_kind() != deglib::distances::MetricDistanceKind::InnerProduct || total_rows < 33) {
+        DatasetProfile prof{static_cast<uint32_t>(total_rows), dim, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, metric};
+        return QuantizationPrediction{deglib::distances::Metric::Uint7_L2, 0.0f, prof};
+    }
+    const std::vector<float> sampled = detail::sample_fp16_rows(data_fp16, dim, sample_count, seed);
+    return detail::predict_quantization_a1a2_from_sampled(sampled, dim, is_cosine, metric, seed, num_threads, cal);
 }
 
 }  // namespace deglib::tuning

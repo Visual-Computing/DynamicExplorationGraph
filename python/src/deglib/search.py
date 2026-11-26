@@ -636,7 +636,7 @@ def reranker(
         - ``None`` / ``"32bit"`` / ``"fp32"`` / ``"float32"``: ``FP32_L2`` or ``FP32_InnerProduct``.
         - ``"16bit"`` / ``"fp16"`` / ``"float16"``: ``FP16_L2`` or ``FP16_InnerProduct``.
         - ``"8bit"`` / ``"auto"``: ``Uint7_L2`` (for L2), ``Int8_InnerProduct`` (for unnormalized ``InnerProduct``),
-          or ``deglib.tuning.predict_quantization(graph, ...)`` (**A1+A2**) for unit-sphere ``cosine``/``normalized`` graphs.
+          or auto-selected ``Uint7_L2`` vs. ``Int8_InnerProduct`` for unit-sphere ``cosine``/``normalized`` graphs.
         - ``"int8"``: ``Int8_L2`` or ``Int8_InnerProduct``.
         - ``"uint8"`` / ``"uint7"`` or any explicit ``Metric`` / metric string.
     optimize : bool, default=True
@@ -876,7 +876,8 @@ def searcher(
         - ``None``: Use ``graph`` as-is without re-quantizing.
         - ``"32bit"`` (also ``"fp32"``, ``"float32"``): ``FP32_L2`` or ``FP32_InnerProduct``.
         - ``"16bit"`` (also ``"fp16"``, ``"float16"``): ``FP16_L2`` or ``FP16_InnerProduct``.
-        - ``"8bit"`` / ``"auto"``: ``Uint7_L2`` (L2) or ``Int8_InnerProduct`` (InnerProduct).
+        - ``"8bit"`` / ``"auto"``: ``Uint7_L2`` (L2), ``Int8_InnerProduct`` (unnormalized ``InnerProduct``),
+          or auto-selected ``Uint7_L2`` vs. ``Int8_InnerProduct`` on unit-sphere ``cosine``/``normalized`` graphs.
         - ``"4bit"``: Always ``Uint4_L2`` (auto-prepending ``MipsTransform`` on unnormalized
           ``InnerProduct`` graphs).
         - ``"2bit"`` (also ``"evp"``): ``EVP_InnerProduct``.

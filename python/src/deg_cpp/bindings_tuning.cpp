@@ -57,16 +57,26 @@ void bind_tuning(nb::module_& m) {
             return std::format("QuantizationPrediction(metric={}, uint7_advantage_pct={:+.2f}%)", r.metric.to_string(), r.uint7_advantage_pct);
         });
 
-    auto measure_profile_py = [](const InArray& data, deglib::distances::MetricType metric, size_t sample_count, size_t query_count, uint32_t seed,
-                                 size_t threads) -> deglib::tuning::DatasetProfile {
-        auto [count, dim] = get_2d_shape(data);
+    auto parse_tuning_array = [](const InArray& data, const void*& ptr, uint32_t& dim, size_t& count, bool& is_fp16) {
+        auto shape = get_2d_shape(data);
+        count = shape.first;
+        dim = shape.second;
         const auto dt = data.dtype();
         const bool is_fp32 = is_dtype_float32(dt);
-        const bool is_fp16 = is_dtype_float16_only(dt);
+        is_fp16 = is_dtype_float16_only(dt);
         if (!is_fp32 && !is_fp16) {
             throw std::invalid_argument("data must be a 2D float32 or float16 array");
         }
-        const void* ptr = data.data();
+        ptr = data.data();
+    };
+
+    auto measure_profile_py = [parse_tuning_array](const InArray& data, deglib::distances::MetricType metric, size_t sample_count, size_t query_count,
+                                                   uint32_t seed, size_t threads) -> deglib::tuning::DatasetProfile {
+        const void* ptr = nullptr;
+        uint32_t dim = 0;
+        size_t count = 0;
+        bool is_fp16 = false;
+        parse_tuning_array(data, ptr, dim, count, is_fp16);
         const deglib::distances::Metric resolved_metric(metric);
         nb::gil_scoped_release release;
         if (is_fp16) {
@@ -104,20 +114,56 @@ void bind_tuning(nb::module_& m) {
         "Measure a DatasetProfile and predict OptimizationTarget from a 2D float32 or float16 array."
     );
     tuning_module.def(
-        "predict_quantization", [](const deglib::tuning::DatasetProfile& profile) { return deglib::tuning::predict_quantization(profile); }, nb::arg("profile"),
-        "Predict quantizer Metric (Uint7_L2 vs Int8_InnerProduct) from a precomputed DatasetProfile."
-    );
-    tuning_module.def(
         "predict_quantization",
-        [measure_profile_py](
+        [parse_tuning_array](
             const InArray& data, deglib::distances::MetricType metric, size_t sample_count, size_t query_count, uint32_t seed, size_t threads
         ) {
-            const auto profile = measure_profile_py(data, metric, sample_count, query_count, seed, threads);
-            return deglib::tuning::predict_quantization(profile);
+            const void* ptr = nullptr;
+            uint32_t dim = 0;
+            size_t count = 0;
+            bool is_fp16 = false;
+            parse_tuning_array(data, ptr, dim, count, is_fp16);
+            const deglib::distances::Metric resolved_metric(metric);
+            nb::gil_scoped_release release;
+            if (is_fp16) {
+                return deglib::tuning::predict_quantization(
+                    std::span<const uint16_t>(static_cast<const uint16_t*>(ptr), count * static_cast<size_t>(dim)), dim, resolved_metric, sample_count,
+                    query_count, seed, threads
+                );
+            }
+            return deglib::tuning::predict_quantization(
+                std::span<const float>(static_cast<const float*>(ptr), count * static_cast<size_t>(dim)), dim, resolved_metric, sample_count, query_count,
+                seed, threads
+            );
         },
         nb::arg("data"), nb::arg("metric") = deglib::distances::MetricType::FP32_L2, nb::arg("sample_count") = deglib::tuning::kDefaultSampleCount,
         nb::arg("query_count") = deglib::tuning::kDefaultQueryCount, nb::arg("seed") = deglib::tuning::kDefaultSeed, nb::arg("threads") = 0,
-        "Measure a DatasetProfile and predict quantizer Metric (Uint7_L2 vs Int8_InnerProduct) from a 2D float32 or float16 array."
+        "Predict quantizer Metric (Uint7_L2 vs Int8_InnerProduct) from raw vectors using K5-Top (deglib.build / deglib.reranker_with_data)."
+    );
+    tuning_module.def(
+        "predict_quantization_normalized",
+        [parse_tuning_array](const InArray& data, bool is_cosine, deglib::distances::MetricType metric, size_t sample_count, uint32_t seed, size_t threads) {
+            const void* ptr = nullptr;
+            uint32_t dim = 0;
+            size_t count = 0;
+            bool is_fp16 = false;
+            parse_tuning_array(data, ptr, dim, count, is_fp16);
+            const deglib::distances::Metric resolved_metric(metric);
+            nb::gil_scoped_release release;
+            if (is_fp16) {
+                return deglib::tuning::predict_quantization_normalized(
+                    std::span<const uint16_t>(static_cast<const uint16_t*>(ptr), count * static_cast<size_t>(dim)), dim, is_cosine, resolved_metric,
+                    sample_count, seed, threads
+                );
+            }
+            return deglib::tuning::predict_quantization_normalized(
+                std::span<const float>(static_cast<const float*>(ptr), count * static_cast<size_t>(dim)), dim, is_cosine, resolved_metric, sample_count,
+                seed, threads
+            );
+        },
+        nb::arg("data"), nb::arg("is_cosine"), nb::arg("metric") = deglib::distances::MetricType::FP32_InnerProduct,
+        nb::arg("sample_count") = deglib::tuning::kDefaultSampleCount, nb::arg("seed") = deglib::tuning::kDefaultSeed, nb::arg("threads") = 0,
+        "Predict quantizer Metric (Uint7_L2 vs Int8_InnerProduct) from already L2-normalized vectors using A1+A2 (deglib.compress / deglib.searcher / deglib.reranker)."
     );
     tuning_module.def(
         "predict_quantization",
@@ -183,13 +229,13 @@ void bind_tuning(nb::module_& m) {
                 return deglib::tuning::QuantizationPrediction{deglib::distances::Metric::Int8_InnerProduct, 0.0f, p};
             }
 
-            return deglib::tuning::predict_quantization(
-                std::span<const float>(sample_buf), dim, src_metric, 0, 0, seed, threads
+            return deglib::tuning::predict_quantization_normalized(
+                std::span<const float>(sample_buf), dim, has_l2n, src_metric, 0, seed, threads
             );
         },
         nb::arg("graph"), nb::arg("sample_count") = deglib::tuning::kDefaultSampleCount, nb::arg("seed") = deglib::tuning::kDefaultSeed,
         nb::arg("threads") = 0,
-        "Predict quantizer Metric (Uint7_L2 vs Int8_InnerProduct) directly from a float32/float16 DynamicExplorationGraph."
+        "Predict quantizer Metric (Uint7_L2 vs Int8_InnerProduct) directly from a float32/float16 DynamicExplorationGraph using A1+A2."
     );
 
 }

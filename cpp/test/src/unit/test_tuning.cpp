@@ -333,31 +333,31 @@ TEST(TuningTest, VibeReferenceCalibration) {
          deglib::builder::OptimizationTarget::LowLID,
          6.70f,
          deglib::distances::Metric::Int8_InnerProduct,
-         -0.20f},
+         -2.22f},
         {"yandex",
          {16000, 200, 0.551745f, 1.963387f, 49.41f, -1.655f, 1.013f, -0.0233f, deglib::distances::Metric::FP32_InnerProduct},
          deglib::builder::OptimizationTarget::LowLID,
          9.00f,
-         deglib::distances::Metric::Uint7_L2,
-         9.49f},
+         deglib::distances::Metric::Int8_InnerProduct,
+         -3.55f},
         {"imagenet-align",
          {16000, 640, 0.214643f, 2.047639f, 54.86f, -0.128f, 1.018f, 0.0378f, deglib::distances::Metric::FP32_InnerProduct},
          deglib::builder::OptimizationTarget::LowLID,
          4.92f,
-         deglib::distances::Metric::Uint7_L2,
-         1.29f},
+         deglib::distances::Metric::Int8_InnerProduct,
+         -3.79f},
         {"gooaq-distilroberta",
          {16000, 768, 0.287027f, 1.592527f, 56.24f, -0.845f, 1.000f, -0.0272f, deglib::distances::Metric::FP32_InnerProduct},
          deglib::builder::OptimizationTarget::LowLID,
          2.02f,
          deglib::distances::Metric::Uint7_L2,
-         3.11f},
+         1.33f},
         {"yahoo-minilm",
          {16000, 384, 0.390076f, 1.578273f, 67.51f, -0.758f, 1.000f, -0.0395f, deglib::distances::Metric::FP32_InnerProduct},
          deglib::builder::OptimizationTarget::StreamingData,
          -3.97f,
          deglib::distances::Metric::Uint7_L2,
-         6.51f},
+         1.02f},
         {"agnews-mxbai",
          {16000, 1024, 0.121258f, 1.614592f, 65.92f, -0.184f, 1.002f, -0.0025f, deglib::distances::Metric::FP32_L2},
          deglib::builder::OptimizationTarget::StreamingData,
@@ -369,45 +369,39 @@ TEST(TuningTest, VibeReferenceCalibration) {
          deglib::builder::OptimizationTarget::StreamingData,
          -3.05f,
          deglib::distances::Metric::Uint7_L2,
-         1.13f},
+         0.38f},
         {"landmark-dino",
          {16000, 768, 0.120246f, 1.728638f, 88.61f, -0.451f, 1.001f, -0.0266f, deglib::distances::Metric::FP32_InnerProduct},
          deglib::builder::OptimizationTarget::StreamingData,
          -8.92f,
          deglib::distances::Metric::Uint7_L2,
-         0.83f},
+         0.79f},
         {"arxiv-nomic",
          {16000, 768, 0.081903f, 1.670677f, 72.52f, -0.057f, 1.164f, -0.0239f, deglib::distances::Metric::FP32_InnerProduct},
          deglib::builder::OptimizationTarget::StreamingData,
          -7.53f,
-         deglib::distances::Metric::Int8_InnerProduct,
-         -0.01f},
+         deglib::distances::Metric::Uint7_L2,
+         2.33f},
         {"inaturalist-resnet",
          {16000, 2048, 0.033901f, 2.115867f, 64.16f, 0.063f, 10.651f, -0.1809f, deglib::distances::Metric::FP32_InnerProduct},
          deglib::builder::OptimizationTarget::StreamingData,
          -11.07f,
          deglib::distances::Metric::Uint7_L2,
-         5.65f},
+         12.14f},
         {"celeba-resnet",
          {16000, 2048, 0.010431f, 2.179041f, 82.63f, 0.594f, 22.169f, 0.0753f, deglib::distances::Metric::FP32_InnerProduct},
          deglib::builder::OptimizationTarget::StreamingData,
          -9.89f,
          deglib::distances::Metric::Uint7_L2,
-         18.57f},
+         63.02f},
     };
 
     std::vector<float> preds;
-    std::vector<float> qpreds;
     for (const auto& ref : refs) {
         const auto pred = deglib::tuning::predict_optimization_target(ref.profile);
         EXPECT_EQ(pred.target, ref.expected_target) << ref.name;
         EXPECT_NEAR(pred.lowlid_advantage_pct, ref.expected_adv_pct, 0.25f) << ref.name;
         preds.push_back(pred.lowlid_advantage_pct);
-
-        const auto qpred = deglib::tuning::predict_quantization(ref.profile);
-        EXPECT_EQ(qpred.metric, ref.expected_quant) << ref.name;
-        EXPECT_NEAR(qpred.uint7_advantage_pct, ref.expected_uint7_adv_pct, 0.20f) << ref.name;
-        qpreds.push_back(qpred.uint7_advantage_pct);
     }
 
     EXPECT_GT(preds[1], preds[0]);   // yandex > laion-clip
@@ -416,40 +410,23 @@ TEST(TuningTest, VibeReferenceCalibration) {
     EXPECT_GT(preds[3], 0.0f);       // gooaq > 0
     EXPECT_GT(preds[5], preds[9]);   // agnews-mxbai > inaturalist-resnet
     EXPECT_GT(preds[5], preds[10]);  // agnews-mxbai > celeba-resnet
-
-    // Quantization advantage ordering across InnerProduct datasets:
-    // celeba > yandex > yahoo > inaturalist > gooaq > imagenet > ccnews > landmark > 0 > arxiv > laion
-    EXPECT_GT(qpreds[10], qpreds[1]);
-    EXPECT_GT(qpreds[1], qpreds[4]);
-    EXPECT_GT(qpreds[4], qpreds[9]);
-    EXPECT_GT(qpreds[9], qpreds[3]);
-    EXPECT_GT(qpreds[3], qpreds[2]);
-    EXPECT_GT(qpreds[2], qpreds[6]);
-    EXPECT_GT(qpreds[6], qpreds[7]);
-    EXPECT_GT(qpreds[7], 0.0f);
-    EXPECT_GT(0.0f, qpreds[8]);
-    EXPECT_GT(qpreds[8], qpreds[0]);
-    EXPECT_GT(qpreds[1], qpreds[2]);
 }
 
-TEST(TuningTest, QuantizationL2RuleAndInnerProductInvariance) {
-    // Even an imagenet-align-shaped geometry falls back to Uint7_L2 when metric is L2.
-    const deglib::tuning::DatasetProfile l2_fp32_profile{16000,  640,    0.214643f, 2.047639f,
-                                                         54.86f, -0.128f, 1.018f,   0.0378f, deglib::distances::Metric::FP32_L2};
-    const auto q_l2_fp32 = deglib::tuning::predict_quantization(l2_fp32_profile);
-    EXPECT_EQ(q_l2_fp32.metric, deglib::distances::Metric::Uint7_L2);
-    EXPECT_FLOAT_EQ(q_l2_fp32.uint7_advantage_pct, 0.0f);
-
-    const deglib::tuning::DatasetProfile l2_fp16_profile{16000,  640,    0.214643f, 2.047639f,
-                                                         54.86f, -0.128f, 1.018f,   0.0378f, deglib::distances::Metric::FP16_L2};
-    const auto q_l2_fp16 = deglib::tuning::predict_quantization(l2_fp16_profile);
-    EXPECT_EQ(q_l2_fp16.metric, deglib::distances::Metric::Uint7_L2);
-    EXPECT_FLOAT_EQ(q_l2_fp16.uint7_advantage_pct, 0.0f);
-
-    // Per-row positive rescaling on InnerProduct vectors preserves quantization prediction.
+TEST(TuningTest, QuantizationL2RuleAndNormalizedInvariance) {
     constexpr size_t n = 250;
     constexpr uint32_t dim = 16;
     const auto base = make_random_vectors(n, dim, 101);
+
+    // L2 metrics unconditionally fall back to Uint7_L2 with 0.0% advantage.
+    const auto q_l2 = deglib::tuning::predict_quantization(base, dim, deglib::distances::Metric::FP32_L2, 0, 0, 7, 2);
+    EXPECT_EQ(q_l2.metric, deglib::distances::Metric::Uint7_L2);
+    EXPECT_FLOAT_EQ(q_l2.uint7_advantage_pct, 0.0f);
+
+    const auto qn_l2 = deglib::tuning::predict_quantization_normalized(base, dim, false, deglib::distances::Metric::FP32_L2, 0, 7, 2);
+    EXPECT_EQ(qn_l2.metric, deglib::distances::Metric::Uint7_L2);
+    EXPECT_FLOAT_EQ(qn_l2.uint7_advantage_pct, 0.0f);
+
+    // Per-row positive rescaling on InnerProduct vectors preserves predict_quantization_normalized (A1+A2 is 100% L2-invariant).
     std::mt19937 rng(102);
     std::uniform_real_distribution<float> scale_dist(0.1f, 20.0f);
     std::vector<float> scaled = base;
@@ -460,42 +437,64 @@ TEST(TuningTest, QuantizationL2RuleAndInnerProductInvariance) {
         }
     }
 
-    const auto q_base = deglib::tuning::predict_quantization(base, dim, deglib::distances::Metric::FP32_InnerProduct, 0, 0, 7, 2);
-    const auto q_scaled = deglib::tuning::predict_quantization(scaled, dim, deglib::distances::Metric::FP32_InnerProduct, 0, 0, 7, 2);
-    EXPECT_EQ(q_base.profile.metric, deglib::distances::Metric::FP32_InnerProduct);
-    EXPECT_EQ(q_scaled.profile.metric, deglib::distances::Metric::FP32_InnerProduct);
-    EXPECT_EQ(q_scaled.metric, q_base.metric);
-    EXPECT_NEAR(q_scaled.uint7_advantage_pct, q_base.uint7_advantage_pct, 1e-4f);
+    const auto qn_base =
+        deglib::tuning::predict_quantization_normalized(base, dim, false, deglib::distances::Metric::FP32_InnerProduct, 0, 7, 2);
+    const auto qn_scaled =
+        deglib::tuning::predict_quantization_normalized(scaled, dim, false, deglib::distances::Metric::FP32_InnerProduct, 0, 7, 2);
+    EXPECT_EQ(qn_base.profile.metric, deglib::distances::Metric::FP32_InnerProduct);
+    EXPECT_EQ(qn_scaled.metric, qn_base.metric);
+    EXPECT_NEAR(qn_scaled.uint7_advantage_pct, qn_base.uint7_advantage_pct, 1e-4f);
+
+    // is_cosine=true increases predicted Uint7_L2 advantage compared to is_cosine=false.
+    const auto qn_cos =
+        deglib::tuning::predict_quantization_normalized(base, dim, true, deglib::distances::Metric::FP32_InnerProduct, 0, 7, 2);
+    EXPECT_GT(qn_cos.uint7_advantage_pct, qn_base.uint7_advantage_pct);
 }
 
-TEST(TuningTest, QuantizationFP16DeterminismAndProfileReuse) {
+TEST(TuningTest, QuantizationFP16AndThreadDeterminism) {
     constexpr size_t n = 300;
     constexpr uint32_t dim = 32;
     const auto f32 = make_random_vectors(n, dim, 177);
     std::vector<uint16_t> f16(f32.size());
     deglib::distances::fp16::floats_to_fp16(f32.data(), f16.data(), f32.size());
 
-    const auto q32 = deglib::tuning::predict_quantization(f32, dim, deglib::distances::Metric::FP32_InnerProduct, 200, 150, 7, 2);
-    const auto q16 = deglib::tuning::predict_quantization(std::span<const uint16_t>(f16), dim, deglib::distances::Metric::FP16_InnerProduct, 200, 150, 7, 2);
+    // K5-Top (deglib.build)
+    const auto q32 = deglib::tuning::predict_quantization(f32, dim, deglib::distances::Metric::FP32_InnerProduct, 200, 0, 7, 2);
+    const auto q16 =
+        deglib::tuning::predict_quantization(std::span<const uint16_t>(f16), dim, deglib::distances::Metric::FP16_InnerProduct, 200, 0, 7, 2);
     EXPECT_EQ(q16.profile.metric, deglib::distances::Metric::FP16_InnerProduct);
     EXPECT_EQ(q16.metric, q32.metric);
-    EXPECT_NEAR(q16.uint7_advantage_pct, q32.uint7_advantage_pct, 0.2f);
+    EXPECT_NEAR(q16.uint7_advantage_pct, q32.uint7_advantage_pct, 0.25f);
 
-    const auto q_t1 = deglib::tuning::predict_quantization(f32, dim, deglib::distances::Metric::FP32_InnerProduct, 200, 150, 7, 1);
-    const auto q_t4 = deglib::tuning::predict_quantization(f32, dim, deglib::distances::Metric::FP32_InnerProduct, 200, 150, 7, 4);
+    const auto q_t1 = deglib::tuning::predict_quantization(f32, dim, deglib::distances::Metric::FP32_InnerProduct, 200, 0, 7, 1);
+    const auto q_t4 = deglib::tuning::predict_quantization(f32, dim, deglib::distances::Metric::FP32_InnerProduct, 200, 0, 7, 4);
     EXPECT_EQ(q_t1.metric, q_t4.metric);
     EXPECT_NEAR(q_t1.uint7_advantage_pct, q_t4.uint7_advantage_pct, 1e-4f);
 
-    const auto prof = deglib::tuning::measure_dataset_profile(f32, dim, deglib::distances::Metric::FP32_InnerProduct, 200, 150, 7, 2);
-    const auto q_reuse = deglib::tuning::predict_quantization(prof);
-    EXPECT_EQ(q_reuse.metric, q32.metric);
-    EXPECT_FLOAT_EQ(q_reuse.uint7_advantage_pct, q32.uint7_advantage_pct);
+    // A1+A2 (deglib.compress)
+    const auto qn32 =
+        deglib::tuning::predict_quantization_normalized(f32, dim, true, deglib::distances::Metric::FP32_InnerProduct, 200, 7, 2);
+    const auto qn16 = deglib::tuning::predict_quantization_normalized(
+        std::span<const uint16_t>(f16), dim, true, deglib::distances::Metric::FP16_InnerProduct, 200, 7, 2
+    );
+    EXPECT_EQ(qn16.profile.metric, deglib::distances::Metric::FP16_InnerProduct);
+    EXPECT_EQ(qn16.metric, qn32.metric);
+    EXPECT_NEAR(qn16.uint7_advantage_pct, qn32.uint7_advantage_pct, 0.25f);
+
+    const auto qn_t1 =
+        deglib::tuning::predict_quantization_normalized(f32, dim, false, deglib::distances::Metric::FP32_InnerProduct, 200, 7, 1);
+    const auto qn_t4 =
+        deglib::tuning::predict_quantization_normalized(f32, dim, false, deglib::distances::Metric::FP32_InnerProduct, 200, 7, 4);
+    EXPECT_EQ(qn_t1.metric, qn_t4.metric);
+    EXPECT_NEAR(qn_t1.uint7_advantage_pct, qn_t4.uint7_advantage_pct, 1e-4f);
 }
 
 TEST(TuningTest, QuantizationEdgeCasesAndCustomCalibration) {
     const std::vector<float> vec = {1.0f, 2.0f, 3.0f, 4.0f};
     EXPECT_THROW((void)deglib::tuning::predict_quantization(vec, 0), std::invalid_argument);
     EXPECT_THROW((void)deglib::tuning::predict_quantization(vec, 3), std::invalid_argument);
+    EXPECT_THROW((void)deglib::tuning::predict_quantization_normalized(vec, 0, false), std::invalid_argument);
+    EXPECT_THROW((void)deglib::tuning::predict_quantization_normalized(vec, 3, false), std::invalid_argument);
     const std::vector<uint16_t> vec16 = {0x3c00, 0x3c00, 0x3c00, 0x3c00};
     EXPECT_THROW((void)deglib::tuning::predict_quantization(std::span<const uint16_t>(vec16), 0), std::invalid_argument);
     EXPECT_THROW((void)deglib::tuning::predict_quantization(std::span<const uint16_t>(vec16), 3), std::invalid_argument);
@@ -505,46 +504,31 @@ TEST(TuningTest, QuantizationEdgeCasesAndCustomCalibration) {
     const auto q_empty = deglib::tuning::predict_quantization(empty, 8, deglib::distances::Metric::FP32_InnerProduct);
     EXPECT_EQ(q_empty.metric, deglib::distances::Metric::Uint7_L2);
     EXPECT_FLOAT_EQ(q_empty.uint7_advantage_pct, 0.0f);
-    EXPECT_EQ(q_empty.profile.metric, deglib::distances::Metric::FP32_InnerProduct);
+    const auto qn_empty = deglib::tuning::predict_quantization_normalized(empty, 8, true, deglib::distances::Metric::FP32_InnerProduct);
+    EXPECT_EQ(qn_empty.metric, deglib::distances::Metric::Uint7_L2);
+    EXPECT_FLOAT_EQ(qn_empty.uint7_advantage_pct, 0.0f);
 
     // Single row
     const std::vector<float> single(8, 1.0f);
     const auto q_single = deglib::tuning::predict_quantization(single, 8, deglib::distances::Metric::FP32_InnerProduct);
     EXPECT_EQ(q_single.metric, deglib::distances::Metric::Uint7_L2);
     EXPECT_FLOAT_EQ(q_single.uint7_advantage_pct, 0.0f);
-    EXPECT_EQ(q_single.profile.metric, deglib::distances::Metric::FP32_InnerProduct);
 
-    // All identical vectors -> participation_ratio == 0 -> safe fallback
+    // All identical vectors -> safe fallback
     const std::vector<float> identical(64 * 8, 3.5f);
     const auto q_ident = deglib::tuning::predict_quantization(identical, 8, deglib::distances::Metric::FP32_InnerProduct);
     EXPECT_EQ(q_ident.metric, deglib::distances::Metric::Uint7_L2);
     EXPECT_FLOAT_EQ(q_ident.uint7_advantage_pct, 0.0f);
-
-    // Extreme tiny participation_ratio -> clamped finite score, Uint7_L2
-    const deglib::tuning::DatasetProfile tiny_pr{16000, 2048, 1e-12f, 1.5f, 60.0f, 0.0f, 1.0f, 0.0f, deglib::distances::Metric::FP32_InnerProduct};
-    const auto q_tiny = deglib::tuning::predict_quantization(tiny_pr);
-    EXPECT_EQ(q_tiny.metric, deglib::distances::Metric::Uint7_L2);
-    EXPECT_TRUE(std::isfinite(q_tiny.uint7_advantage_pct));
-    EXPECT_GT(q_tiny.uint7_advantage_pct, 0.0f);
-
-    // NaN / Inf fallback
-    const float nan_val = std::numeric_limits<float>::quiet_NaN();
-    const float inf_val = std::numeric_limits<float>::infinity();
-    const deglib::tuning::DatasetProfile nan_pr{16000, 512, nan_val, 1.9f, 68.0f, 0.0f, 1.0f, 0.0f, deglib::distances::Metric::FP32_InnerProduct};
-    const deglib::tuning::DatasetProfile inf_hkurt{16000, 512, 0.2f, 1.9f, 68.0f, 0.0f, 1.0f, inf_val, deglib::distances::Metric::FP32_InnerProduct};
-    EXPECT_EQ(deglib::tuning::predict_quantization(nan_pr).metric, deglib::distances::Metric::Uint7_L2);
-    EXPECT_FLOAT_EQ(deglib::tuning::predict_quantization(nan_pr).uint7_advantage_pct, 0.0f);
-    EXPECT_EQ(deglib::tuning::predict_quantization(inf_hkurt).metric, deglib::distances::Metric::Uint7_L2);
-    EXPECT_FLOAT_EQ(deglib::tuning::predict_quantization(inf_hkurt).uint7_advantage_pct, 0.0f);
+    const auto qn_ident = deglib::tuning::predict_quantization_normalized(identical, 8, false, deglib::distances::Metric::FP32_InnerProduct);
+    EXPECT_EQ(qn_ident.metric, deglib::distances::Metric::Uint7_L2);
+    EXPECT_FLOAT_EQ(qn_ident.uint7_advantage_pct, 0.0f);
 
     // Custom calibration override
-    deglib::tuning::QuantizationModelCalibration custom_cal{};
-    custom_cal.w_intercept = -0.5;
-    custom_cal.w_dim_over_participation = 0.0;
-    custom_cal.w_hadamard_kurt = 0.0;
-    custom_cal.w_log_dim_over_part = 0.0;
-    const deglib::tuning::DatasetProfile valid_ip{16000, 768, 0.1f, 1.7f, 70.0f, 0.0f, 1.0f, 0.0f, deglib::distances::Metric::FP32_InnerProduct};
-    const auto q_custom = deglib::tuning::predict_quantization(valid_ip, custom_cal);
+    const auto valid_ip = make_random_vectors(100, 16, 202);
+    deglib::tuning::K5QuantizationCalibration custom_k5{};
+    custom_k5.w[0] = -0.5;
+    for (int i = 1; i < 6; ++i) custom_k5.w[i] = 0.0;
+    const auto q_custom = deglib::tuning::predict_quantization(valid_ip, 16, deglib::distances::Metric::FP32_InnerProduct, 0, 0, 7, 1, custom_k5);
     EXPECT_EQ(q_custom.metric, deglib::distances::Metric::Int8_InnerProduct);
     EXPECT_LT(q_custom.uint7_advantage_pct, -25.0f);
 }

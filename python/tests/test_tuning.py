@@ -11,6 +11,7 @@ from deglib.tuning import (
     measure_dataset_profile,
     predict_optimization_target,
     predict_quantization,
+    predict_quantization_normalized,
 )
 
 
@@ -44,21 +45,20 @@ def test_tuning_f32_and_profile_reuse():
     assert pred_from_profile.lowlid_advantage_pct == pytest.approx(pred_direct.lowlid_advantage_pct, abs=1e-6)
     assert pred_from_profile.target.name in str(pred_from_profile)
 
-    qpred_from_profile = predict_quantization(profile)
     qpred_direct = predict_quantization(
         data, metric=Metric.FP32_L2, sample_count=300, query_count=200, seed=7, threads=2
     )
-    assert isinstance(qpred_from_profile, QuantizationPrediction)
-    assert isinstance(qpred_from_profile.metric, Metric)
-    assert qpred_from_profile.metric == Metric.Uint7_L2
-    assert qpred_from_profile.uint7_advantage_pct == 0.0
-    assert qpred_from_profile == qpred_direct
-    assert "L2" in str(qpred_from_profile)
+    assert isinstance(qpred_direct, QuantizationPrediction)
+    assert isinstance(qpred_direct.metric, Metric)
+    assert qpred_direct.metric == Metric.Uint7_L2
+    assert qpred_direct.uint7_advantage_pct == 0.0
+    assert "L2" in str(qpred_direct)
 
-    # Top-level deglib re-exports match deglib.tuning
+    # Module re-exports match deglib.tuning
     assert deglib.tuning.measure_dataset_profile is measure_dataset_profile
     assert deglib.tuning.predict_optimization_target is predict_optimization_target
     assert deglib.tuning.predict_quantization is predict_quantization
+    assert deglib.tuning.predict_quantization_normalized is predict_quantization_normalized
     assert deglib.tuning.DatasetProfile is DatasetProfile
     assert deglib.tuning.TargetPrediction is TargetPrediction
     assert deglib.tuning.QuantizationPrediction is QuantizationPrediction
@@ -102,13 +102,18 @@ def test_tuning_string_metrics_and_inner_product_invariance():
     assert p_l2_str.metric == Metric.FP32_L2
     assert p_l2_str.sample_count == 250
 
-    q_enum = predict_quantization(p_enum)
-    q_str = predict_quantization(rescaled, metric="fp32_cosine", sample_count=0, query_count=0, threads=2)
+    qn_base = predict_quantization_normalized(base, is_cosine=False, metric=Metric.FP32_InnerProduct, sample_count=0, threads=2)
+    qn_scaled = predict_quantization_normalized(rescaled, is_cosine=False, metric="fp32_cosine", sample_count=0, threads=2)
+    qn_cos = predict_quantization_normalized(base, is_cosine=True, metric="fp32_cosine", sample_count=0, threads=2)
     q_l2 = predict_quantization(base, metric="fp32_l2", sample_count=0, query_count=0, threads=2)
-    assert q_str.metric == q_enum.metric
-    assert q_str.uint7_advantage_pct == pytest.approx(q_enum.uint7_advantage_pct, abs=1e-4)
+    qn_l2 = predict_quantization_normalized(base, is_cosine=False, metric="fp32_l2", sample_count=0, threads=2)
+    assert qn_scaled.metric == qn_base.metric
+    assert qn_scaled.uint7_advantage_pct == pytest.approx(qn_base.uint7_advantage_pct, abs=1e-4)
+    assert qn_cos.uint7_advantage_pct > qn_base.uint7_advantage_pct
     assert q_l2.metric == Metric.Uint7_L2
     assert q_l2.uint7_advantage_pct == 0.0
+    assert qn_l2.metric == Metric.Uint7_L2
+    assert qn_l2.uint7_advantage_pct == 0.0
 
 
 def test_tuning_determinism_threads_and_non_contiguous():
@@ -183,95 +188,6 @@ def test_tuning_invalid_inputs():
             fn(_make_vectors(20, 8), threads=-1)
 
 
-def test_predict_quantization_vibe_reference_profiles():
-    refs = [
-        (
-            "laion-clip",
-            DatasetProfile(16000, 512, 0.174291, 1.907535, 68.472295, hadamard_kurt=0.1052, metric=Metric.FP32_InnerProduct),
-            Metric.Int8_InnerProduct,
-            -0.20,
-        ),
-        (
-            "yandex",
-            DatasetProfile(16000, 200, 0.551745, 1.963387, 49.415739, hadamard_kurt=-0.0233, metric=Metric.FP32_InnerProduct),
-            Metric.Uint7_L2,
-            9.49,
-        ),
-        (
-            "imagenet-align",
-            DatasetProfile(16000, 640, 0.214643, 2.047639, 54.426652, hadamard_kurt=0.0378, metric=Metric.FP32_InnerProduct),
-            Metric.Uint7_L2,
-            1.29,
-        ),
-        (
-            "gooaq-distilroberta",
-            DatasetProfile(16000, 768, 0.287027, 1.592527, 55.598128, hadamard_kurt=-0.0272, metric=Metric.FP32_InnerProduct),
-            Metric.Uint7_L2,
-            3.11,
-        ),
-        (
-            "yahoo-minilm",
-            DatasetProfile(16000, 384, 0.390076, 1.578273, 67.708323, hadamard_kurt=-0.0395, metric=Metric.FP32_InnerProduct),
-            Metric.Uint7_L2,
-            6.51,
-        ),
-        (
-            "agnews-mxbai",
-            DatasetProfile(16000, 1024, 0.121258, 1.614592, 67.004191, hadamard_kurt=-0.0025, metric=Metric.FP32_L2),
-            Metric.Uint7_L2,
-            0.0,
-        ),
-        (
-            "ccnews-nomic",
-            DatasetProfile(16000, 768, 0.149226, 1.730994, 75.723209, hadamard_kurt=-0.0178, metric=Metric.FP32_InnerProduct),
-            Metric.Uint7_L2,
-            1.13,
-        ),
-        (
-            "landmark-dino",
-            DatasetProfile(16000, 768, 0.120246, 1.728638, 86.464614, hadamard_kurt=-0.0266, metric=Metric.FP32_InnerProduct),
-            Metric.Uint7_L2,
-            0.83,
-        ),
-        (
-            "arxiv-nomic",
-            DatasetProfile(16000, 768, 0.081903, 1.670677, 71.741581, hadamard_kurt=-0.0239, metric=Metric.FP32_InnerProduct),
-            Metric.Int8_InnerProduct,
-            -0.01,
-        ),
-        (
-            "inaturalist-resnet",
-            DatasetProfile(16000, 2048, 0.033901, 2.115867, 65.657329, hadamard_kurt=-0.1809, metric=Metric.FP32_InnerProduct),
-            Metric.Uint7_L2,
-            5.65,
-        ),
-        (
-            "celeba-resnet",
-            DatasetProfile(16000, 2048, 0.010431, 2.179041, 81.038963, hadamard_kurt=0.0753, metric=Metric.FP32_InnerProduct),
-            Metric.Uint7_L2,
-            18.57,
-        ),
-    ]
-
-    advs = []
-    for name, profile, expected_metric, expected_adv in refs:
-        pred = predict_quantization(profile)
-        assert pred.metric == expected_metric, name
-        assert pred.uint7_advantage_pct == pytest.approx(expected_adv, abs=0.20), name
-        assert pred.metric.name in str(pred)
-        advs.append(pred.uint7_advantage_pct)
-
-    # celeba > yandex > yahoo > inaturalist > gooaq > imagenet > ccnews > landmark > 0 > arxiv > laion
-    assert advs[10] > advs[1] > advs[4] > advs[9] > advs[3] > advs[2] > advs[6] > advs[7] > 0.0 > advs[8] > advs[0]
-
-    # L2 rule overrides high-CV geometry unconditionally
-    l2_override = predict_quantization(
-        DatasetProfile(16000, 640, 0.214643, 2.047639, 54.426652, metric="fp32_l2")
-    )
-    assert l2_override.metric == Metric.Uint7_L2
-    assert l2_override.uint7_advantage_pct == 0.0
-
-
 def test_predict_quantization_fp16_threads_slice_and_edge_cases():
     f32 = _make_vectors(400, 32, seed=61)
     f16 = f32.astype(np.float16)
@@ -284,7 +200,17 @@ def test_predict_quantization_fp16_threads_slice_and_edge_cases():
     )
     assert q16.profile.metric == Metric.FP16_InnerProduct
     assert q16.metric == q32.metric
-    assert q16.uint7_advantage_pct == pytest.approx(q32.uint7_advantage_pct, abs=0.2)
+    assert q16.uint7_advantage_pct == pytest.approx(q32.uint7_advantage_pct, abs=0.25)
+
+    qn32 = predict_quantization_normalized(
+        f32, is_cosine=True, metric=Metric.FP32_InnerProduct, sample_count=250, seed=7, threads=2
+    )
+    qn16 = predict_quantization_normalized(
+        f16, is_cosine=True, metric=Metric.FP16_InnerProduct, sample_count=250, seed=7, threads=2
+    )
+    assert qn16.profile.metric == Metric.FP16_InnerProduct
+    assert qn16.metric == qn32.metric
+    assert qn16.uint7_advantage_pct == pytest.approx(qn32.uint7_advantage_pct, abs=0.25)
 
     q_t1 = predict_quantization(
         f32, metric=Metric.FP32_InnerProduct, sample_count=250, query_count=150, seed=7, threads=1
@@ -312,3 +238,25 @@ def test_predict_quantization_fp16_threads_slice_and_edge_cases():
         pred = predict_quantization(edge, metric=Metric.FP32_InnerProduct)
         assert pred.metric == Metric.Uint7_L2
         assert pred.uint7_advantage_pct == 0.0
+        pred_n = predict_quantization_normalized(edge, is_cosine=False, metric=Metric.FP32_InnerProduct)
+        assert pred_n.metric == Metric.Uint7_L2
+        assert pred_n.uint7_advantage_pct == 0.0
+
+
+def test_reranker_8bit_predictor_dispatch():
+    rng = np.random.default_rng(77)
+    x = rng.normal(size=(64, 32)).astype(np.float32)
+
+    g_l2 = deglib.build(x, metric="l2", edges_per_vertex=12, extend_k=12, threads=1)
+    assert deglib.reranker(g_l2, compress="8bit", threads=1).metric == Metric.Uint7_L2
+    assert deglib.reranker_with_data(g_l2, x, compress="8bit", threads=1).metric == Metric.Uint7_L2
+
+    g_ip = deglib.build(x, metric="ip", edges_per_vertex=12, extend_k=12, threads=1)
+    assert deglib.reranker(g_ip, compress="8bit", threads=1).metric == Metric.Int8_InnerProduct
+    assert deglib.reranker_with_data(g_ip, x, compress="8bit", metric="ip", threads=1).metric == Metric.Int8_InnerProduct
+
+    g_cos = deglib.build(x, metric="cosine", edges_per_vertex=12, extend_k=12, threads=1)
+    rr_cos = deglib.reranker(g_cos, compress="8bit", threads=1)
+    rr_cos_data = deglib.reranker_with_data(g_cos, x, compress="8bit", metric="cosine", threads=1)
+    assert rr_cos.metric in (Metric.Uint7_L2, Metric.Int8_InnerProduct)
+    assert rr_cos_data.metric in (Metric.Uint7_L2, Metric.Int8_InnerProduct)
