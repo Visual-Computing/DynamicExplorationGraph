@@ -7,8 +7,9 @@
 #include "deglib/search/result_list.h"
 
 #include <algorithm>
-#include <chrono>
 #include <array>
+#include <chrono>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -734,6 +735,59 @@ class InternalGraph {
     }
 
     /**
+     * Evaluates distances for collected neighbors using either 4-way batching (when supported by
+     * the kernel) or interleaved single-target prefetching, invoking `on_neighbor(neighbor_index, dist)`
+     * for each neighbor.
+     */
+    struct NeighborEvaluator {
+        const void* query;
+        deglib::distances::DISTFUNC dist_func;
+        deglib::distances::BATCH_DISTFUNC batch_dist_func;
+        const void* dist_param;
+        bool use_batch;
+        int32_t po;
+        size_t prefetch_bytes;
+
+        template <typename GraphType>
+        NeighborEvaluator(const GraphType& self, const void* q) noexcept
+            : query(q),
+              dist_func(self.feature_space_.get_dist_func()),
+              batch_dist_func(self.feature_space_.get_batch_dist_func()),
+              dist_param(self.feature_space_.get_dist_func_param()),
+              use_batch(self.feature_space_.has_batch4()),
+              po(self.getPo()),
+              prefetch_bytes(static_cast<size_t>(self.getPl()) * deglib::memory::L1_CACHE_LINE_SIZE) {}
+
+        inline void operator()(
+            std::span<const uint32_t> neighbors,
+            std::span<const void* const> features,
+            std::invocable<uint32_t, float> auto&& on_neighbor
+        ) const {
+            const size_t count = neighbors.size();
+            if (use_batch) {
+                alignas(64) float distances[256];
+                batch_dist_func(query, features.data(), count, dist_param, distances, po, prefetch_bytes);
+                for (size_t i = 0; i < count; ++i) {
+                    on_neighbor(neighbors[i], distances[i]);
+                }
+            } else {
+                const bool do_prefetch = po > 0 && prefetch_bytes > 0;
+                const size_t po_u = do_prefetch ? static_cast<size_t>(po) : 0;
+                const size_t warmup = do_prefetch ? (std::min)(po_u, count) : 0;
+                for (size_t i = 0; i < warmup; ++i) {
+                    deglib::memory::prefetch(reinterpret_cast<const char*>(features[i]), prefetch_bytes);
+                }
+                for (size_t i = 0; i < count; ++i) {
+                    if (do_prefetch && i + po_u < count) {
+                        deglib::memory::prefetch(reinterpret_cast<const char*>(features[i + po_u]), prefetch_bytes);
+                    }
+                    on_neighbor(neighbors[i], dist_func(query, features[i], dist_param));
+                }
+            }
+        }
+    };
+
+    /**
      * Statically dispatched exploration and k-NN search implementation.
      * Inlines graph member accesses (features, neighbors, labels) via GraphType to avoid vtable calls.
      */
@@ -829,8 +883,7 @@ class InternalGraph {
         auto radius = (results.size() < k) ? std::numeric_limits<float>::max() : results.top().getDistance();
         auto exploration_radius = (radius == std::numeric_limits<float>::max()) ? radius : radius * ((radius < 0) ? (1 - eps) : (1 + eps));
 
-        const int32_t po = self.getPo();
-        const size_t prefetch_bytes = static_cast<size_t>(self.getPl()) * deglib::memory::L1_CACHE_LINE_SIZE;
+        const NeighborEvaluator evaluate(self, query);
         const int32_t nl = self.getNl();
         const size_t edges_per_vertex = self.edges_per_vertex_;
         alignas(64) uint32_t good_neighbors[256];
@@ -868,46 +921,40 @@ class InternalGraph {
                 if (good_neighbor_count <= 0) break;
             }
 
-            const int32_t warmup = (po > 0 && prefetch_bytes > 0) ? (std::min)(po, good_neighbor_count) : 0;
-            for (int32_t i = 0; i < warmup; ++i) {
-                deglib::memory::prefetch(reinterpret_cast<const char*>(good_features[i]), prefetch_bytes);
-            }
+            const size_t n = static_cast<size_t>(good_neighbor_count);
+            evaluate(
+                {good_neighbors, n},
+                {good_features, n},
+                [&](const uint32_t neighbor_index, const float neighbor_distance) {
+                    // check the neighborhood of this vertex later, if its good enough
+                    if (neighbor_distance <= exploration_radius) {
+                        next_vertices.emplace(neighbor_index, neighbor_distance);
+                        deglib::memory::prefetch(
+                            reinterpret_cast<const char*>(self.neighbors_by_index(neighbor_index)), static_cast<size_t>(nl) * deglib::memory::L1_CACHE_LINE_SIZE
+                        );
 
-            for (int32_t i = 0; i < good_neighbor_count; ++i) {
-                if (i + po < good_neighbor_count && prefetch_bytes > 0) {
-                    deglib::memory::prefetch(reinterpret_cast<const char*>(good_features[i + po]), prefetch_bytes);
-                }
-                const uint32_t neighbor_index = good_neighbors[i];
-                const float neighbor_distance = dist_func(query, good_features[i], dist_func_param);
-
-                // check the neighborhood of this vertex later, if its good enough
-                if (neighbor_distance <= exploration_radius) {
-                    next_vertices.emplace(neighbor_index, neighbor_distance);
-                    deglib::memory::prefetch(
-                        reinterpret_cast<const char*>(self.neighbors_by_index(neighbor_index)), static_cast<size_t>(nl) * deglib::memory::L1_CACHE_LINE_SIZE
-                    );
-
-                    // remember the vertex, if its better than the worst in the result list
-                    if (neighbor_distance < radius) {
-                        bool insert = true;
-                        if constexpr (use_filter) {
-                            insert = filter->is_valid(self.label_by_index(neighbor_index));
-                        }
-                        if (insert) {
-                            if (results.size() < k) {
-                                results.emplace(neighbor_index, neighbor_distance);
-                                if (results.size() == k) {
-                                    radius = results.top().getDistance();
+                        // remember the vertex, if its better than the worst in the result list
+                        if (neighbor_distance < radius) {
+                            bool insert = true;
+                            if constexpr (use_filter) {
+                                insert = filter->is_valid(self.label_by_index(neighbor_index));
+                            }
+                            if (insert) {
+                                if (results.size() < k) {
+                                    results.emplace(neighbor_index, neighbor_distance);
+                                    if (results.size() == k) {
+                                        radius = results.top().getDistance();
+                                        exploration_radius = radius * ((radius < 0) ? (1 - eps) : (1 + eps));
+                                    }
+                                } else {
+                                    radius = results.replace_top(neighbor_index, neighbor_distance).getDistance();
                                     exploration_radius = radius * ((radius < 0) ? (1 - eps) : (1 + eps));
                                 }
-                            } else {
-                                radius = results.replace_top(neighbor_index, neighbor_distance).getDistance();
-                                exploration_radius = radius * ((radius < 0) ? (1 - eps) : (1 + eps));
                             }
                         }
                     }
                 }
-            }
+            );
 
             dist_count += static_cast<uint32_t>(good_neighbor_count);
             if constexpr (use_max_distance_count) {
@@ -1019,8 +1066,7 @@ class InternalGraph {
             }
         }
 
-        const int32_t po = self.getPo();
-        const size_t prefetch_bytes = static_cast<size_t>(self.getPl()) * deglib::memory::L1_CACHE_LINE_SIZE;
+        const NeighborEvaluator evaluate(self, query);
         const int32_t nl = self.getNl();
         const size_t edges_per_vertex = self.edges_per_vertex_;
         alignas(64) uint32_t good_neighbors[256];
@@ -1061,32 +1107,26 @@ class InternalGraph {
                 if (good_neighbor_count <= 0) break;
             }
 
-            const int32_t warmup = (po > 0 && prefetch_bytes > 0) ? (std::min)(po, good_neighbor_count) : 0;
-            for (int32_t i = 0; i < warmup; ++i) {
-                deglib::memory::prefetch(reinterpret_cast<const char*>(good_features[i]), prefetch_bytes);
-            }
+            const size_t n = static_cast<size_t>(good_neighbor_count);
+            evaluate(
+                {good_neighbors, n},
+                {good_features, n},
+                [&](const uint32_t neighbor_index, const float dist) {
+                    // check the neighborhood of this vertex later, if its good enough
+                    if (dist <= radius) {
+                        next_vertices.emplace(neighbor_index, dist);
+                        deglib::memory::prefetch(
+                            reinterpret_cast<const char*>(self.neighbors_by_index(neighbor_index)), static_cast<size_t>(nl) * deglib::memory::L1_CACHE_LINE_SIZE
+                        );
+                    }
 
-            for (int32_t i = 0; i < good_neighbor_count; ++i) {
-                if (i + po < good_neighbor_count && prefetch_bytes > 0) {
-                    deglib::memory::prefetch(reinterpret_cast<const char*>(good_features[i + po]), prefetch_bytes);
+                    if constexpr (use_filter) {
+                        if (filter->is_valid(self.label_by_index(neighbor_index))) valid_results.insert(neighbor_index, dist);
+                    } else {
+                        valid_results.insert(neighbor_index, dist);
+                    }
                 }
-                const uint32_t neighbor_index = good_neighbors[i];
-                const float dist = dist_func(query, good_features[i], dist_func_param);
-
-                // check the neighborhood of this vertex later, if its good enough
-                if (dist <= radius) {
-                    next_vertices.emplace(neighbor_index, dist);
-                    deglib::memory::prefetch(
-                        reinterpret_cast<const char*>(self.neighbors_by_index(neighbor_index)), static_cast<size_t>(nl) * deglib::memory::L1_CACHE_LINE_SIZE
-                    );
-                }
-
-                if constexpr (use_filter) {
-                    if (filter->is_valid(self.label_by_index(neighbor_index))) valid_results.insert(neighbor_index, dist);
-                } else {
-                    valid_results.insert(neighbor_index, dist);
-                }
-            }
+            );
 
             dist_count += static_cast<uint32_t>(good_neighbor_count);
             if constexpr (use_max_distance_count) {
@@ -1169,8 +1209,7 @@ class InternalGraph {
                 }
             }
 
-            const int32_t po = self.getPo();
-            const size_t prefetch_bytes = static_cast<size_t>(self.getPl()) * deglib::memory::L1_CACHE_LINE_SIZE;
+            const NeighborEvaluator evaluate(self, query);
             const int32_t nl = self.getNl();
             const size_t edges_per_vertex = self.edges_per_vertex_;
             alignas(64) uint32_t good_neighbors[256];
@@ -1204,23 +1243,18 @@ class InternalGraph {
                     if (good_neighbor_count <= 0) break;
                 }
 
-                const int32_t warmup = (po > 0 && prefetch_bytes > 0) ? (std::min)(po, good_neighbor_count) : 0;
-                for (int32_t i = 0; i < warmup; ++i) {
-                    deglib::memory::prefetch(reinterpret_cast<const char*>(good_features[i]), prefetch_bytes);
-                }
-
-                for (int32_t i = 0; i < good_neighbor_count; ++i) {
-                    if (i + po < good_neighbor_count && prefetch_bytes > 0) {
-                        deglib::memory::prefetch(reinterpret_cast<const char*>(good_features[i + po]), prefetch_bytes);
+                const size_t n = static_cast<size_t>(good_neighbor_count);
+                evaluate(
+                    {good_neighbors, n},
+                    {good_features, n},
+                    [&](const uint32_t neighbor_index, const float neighbor_distance) {
+                        if (pool.insert(neighbor_index, neighbor_distance)) {
+                            deglib::memory::prefetch(
+                                reinterpret_cast<const char*>(self.neighbors_by_index(neighbor_index)), static_cast<size_t>(nl) * deglib::memory::L1_CACHE_LINE_SIZE
+                            );
+                        }
                     }
-                    const uint32_t neighbor_index = good_neighbors[i];
-                    const float neighbor_distance = dist_func(query, good_features[i], dist_func_param);
-                    if (pool.insert(neighbor_index, neighbor_distance)) {
-                        deglib::memory::prefetch(
-                            reinterpret_cast<const char*>(self.neighbors_by_index(neighbor_index)), static_cast<size_t>(nl) * deglib::memory::L1_CACHE_LINE_SIZE
-                        );
-                    }
-                }
+                );
 
                 dist_count += static_cast<uint32_t>(good_neighbor_count);
                 if constexpr (use_max_distance_count) {

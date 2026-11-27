@@ -162,6 +162,11 @@ concept DistanceFunction = requires(const void* a, const void* b, const void* pa
     { T::get_instruction() } -> std::convertible_to<const char*>;
 } && std::is_convertible_v<decltype(&T::compare), DISTFUNC>;
 
+template <typename Dist>
+concept HasCompareBatch4 = requires(const void* q, const void* t, const void* param, float* out) {
+    Dist::compare_batch4(q, t, t, t, t, param, out);
+};
+
 namespace detail {
 
 template <DistanceFunction Dist>
@@ -174,7 +179,7 @@ inline void batch_compare_impl(
     const int32_t prefetch_offset,
     const size_t prefetch_bytes
 ) {
-    constexpr bool has_batch4 = requires { Dist::compare_batch4(query, query, query, query, query, param, out_distances); };
+    constexpr bool has_batch4 = HasCompareBatch4<Dist>;
     if (prefetch_offset > 0 && prefetch_bytes > 0) {
         const size_t po = static_cast<size_t>(prefetch_offset);
         const size_t warmup = std::min(po, count);
@@ -252,6 +257,7 @@ struct DistanceKernel {
     BATCH_DISTFUNC compare_batch = nullptr;
     STRIDED_DISTFUNC compare_strided = nullptr;
     const char* instruction = "Unknown";
+    bool has_batch4 = false;
 
     template <DistanceFunction Dist>
     static consteval DistanceKernel make() noexcept {
@@ -260,6 +266,7 @@ struct DistanceKernel {
             &detail::batch_compare_impl<Dist>,
             &detail::strided_compare_impl<Dist>,
             Dist::get_instruction(),
+            HasCompareBatch4<Dist>,
         };
     }
 };
@@ -393,6 +400,11 @@ class FloatSpace {
      * Returns a function pointer for batch distance computation over contiguous strided targets.
      */
     STRIDED_DISTFUNC get_strided_dist_func() const noexcept { return kernel_.compare_strided; }
+
+    /**
+     * Returns true if the selected distance kernel provides a 4-way batch comparison (compare_batch4).
+     */
+    bool has_batch4() const noexcept { return kernel_.has_batch4; }
 
     /**
      * Returns the instruction set name (e.g. "AVX512", "AVX2", "Scalar") used by the distance function.
