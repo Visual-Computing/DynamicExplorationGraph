@@ -549,23 +549,25 @@ class DynamicExplorationGraph:
         """Resolve C++ transformations and target FloatSpace for a target metric."""
         src_metric = self.get_metric()
         src_dim = self.get_dim()
+        src_is_ip = Metric(int(src_metric)).name.endswith("InnerProduct")
+        dst_is_l2 = not Metric(int(resolved_metric)).name.endswith("InnerProduct")
+        dst_is_fp = Metric(int(resolved_metric)) in (_FP32_METRICS | _FP16_METRICS)
+        has_spatial_prefix = any(t.type == TransformationType.Spatial for t in self.get_transformations())
+        need_mips = src_is_ip and (dst_is_l2 or dst_is_fp) and not has_spatial_prefix
+
         same_data_type = (int(resolved_metric) & 0xF0) == (int(src_metric) & 0xF0)
-        if same_data_type:
+        if same_data_type and not (need_mips and self.size() > 0 and Metric(int(src_metric)) in _FLOAT_METRICS):
             return [], resolved_metric._to_cpp_space(src_dim)
 
         if Metric(int(src_metric)) not in _FLOAT_METRICS:
             raise ValueError(
                 f"Cannot change metric from non-float metric '{src_metric.name}' to '{resolved_metric.name}'."
             )
-        if Metric(int(resolved_metric)) in _FP32_METRICS:
+        if Metric(int(resolved_metric)) in _FP32_METRICS and not same_data_type:
             raise ValueError(
                 f"Cannot switch from '{src_metric.name}' to '{resolved_metric.name}' without explicit transformations; "
                 "use with_transformations() instead."
             )
-        src_is_ip = Metric(int(src_metric)).name.endswith("InnerProduct")
-        dst_is_l2 = not Metric(int(resolved_metric)).name.endswith("InnerProduct")
-        has_spatial_prefix = any(t.type == TransformationType.Spatial for t in self.get_transformations())
-        need_mips = src_is_ip and dst_is_l2 and not has_spatial_prefix
         xfrms = cpp_transformation.make_quantizer_pipeline_from_graph(
             self.dynamic_exploration_graph_cpp,
             int(resolved_metric),
@@ -576,6 +578,15 @@ class DynamicExplorationGraph:
             False,
             need_mips,
         )
+        if not xfrms:
+            return [], resolved_metric._to_cpp_space(src_dim)
+        if (
+            same_data_type
+            and Metric(int(src_metric)) in _FP16_METRICS
+            and len(xfrms) == 1
+            and xfrms[0].name == "ScalarQuantizerFP16"
+        ):
+            return [], resolved_metric._to_cpp_space(src_dim)
         return xfrms, resolved_metric._to_cpp_space(int(xfrms[-1].output_dim))
 
     def to_searcher(
@@ -1056,6 +1067,18 @@ def load_mutable_graph(path: pathlib.Path | str, capacity: int = 0) -> DynamicEx
     return DynamicExplorationGraph(deglib_cpp.load_sizebounded_graph(str(p), capacity))
 
 
+def _is_unnormalized_ip_graph(graph: DynamicExplorationGraph) -> bool:
+    """Return True if ``graph`` is a non-empty float InnerProduct graph with unnormalized vectors and no spatial prefix."""
+    src_metric = graph.get_metric()
+    if not Metric(int(src_metric)).name.endswith("InnerProduct"):
+        return False
+    if graph.size() == 0 or Metric(int(src_metric)) not in _FLOAT_METRICS:
+        return False
+    if any(t.type == TransformationType.Spatial for t in graph.get_transformations()):
+        return False
+    return not cpp_transformation.is_l2_normalized_graph(graph.dynamic_exploration_graph_cpp, 1024)
+
+
 def compress(
     graph: DynamicExplorationGraph,
     target: Literal["32bit", "16bit", "8bit", "4bit", "2bit", "auto"] | Metric | str,
@@ -1107,7 +1130,7 @@ def compress(
         key = target.strip().lower().replace("-", "").replace("_", "")
         if key in ("32bit", "fp32", "float32"):
             target_metric = Metric.FP32_InnerProduct if src_is_ip else Metric.FP32_L2
-            if Metric(int(src_metric)) == Metric(int(target_metric)):
+            if Metric(int(src_metric)) == Metric(int(target_metric)) and not _is_unnormalized_ip_graph(graph):
                 return graph
         elif key in ("16bit", "fp16", "float16"):
             target_metric = Metric.FP16_InnerProduct if src_is_ip else Metric.FP16_L2

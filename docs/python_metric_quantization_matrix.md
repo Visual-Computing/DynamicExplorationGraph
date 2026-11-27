@@ -21,8 +21,12 @@ This reference documents the exact internal behavior of the high-level Python AP
 |---|---|---|---|---|
 | `"l2"` / `"euclidean"` | `FP32_L2` (`float32`) / `FP16_L2` (`float16`) directly on `data` (`dim = d`) | Quantizes `data` before `add_entry` when `compress` is set, and builds directly in the target space (`dim = d`) | Mutable `SizeBoundedGraph` (`dim = d`, keeps `[(FWHT), Quantizer]` if `compress` is set) | True metric; building directly in compressed form saves build RAM |
 | `"cosine"` / `"normalized"` | `FP32_L2` / `FP16_L2` directly on `data` (`dim = d`) | Attaches `L2NormalizeTransform` if `not is_l2_normalized(data)` (`dim = d`); `presort=None`/`True` sorts on normalized vectors; if `compress` is set, quantizes normalized vectors before `add_entry` and builds directly in target space | Mutable `SizeBoundedGraph` (`dim = d`, keeps `[L2NormalizeTransform?, (FWHT), Quantizer]`) | Automatically normalizes DB and query vectors and preserves `L2NormalizeTransform` for `deglib.compress(..., "8bit")` auto-prediction |
-| `"ip"` / `"innerproduct"` / `"inner_product"` / `"mips"` | `make_mips_transform(data)` → FLAS in `FP32_L2` (`dim = d + 1`), or `FP32_InnerProduct` / `FP16_InnerProduct` (`dim = d`) if `is_l2_normalized(data)` | If `is_l2_normalized(data)`: behaves like `"normalized"` (`FP32_InnerProduct` / `FP16_InnerProduct`, no `MipsTransform`). Otherwise: `make_mips_transform(data)` → quantizes to target bit-width `L2` (`FP32_L2`, `FP16_L2`, `Uint7_L2` for `"8bit"`/`"auto"`, `Uint4_L2` for `"4bit"`/`"2bit"`) before `add_entry` and builds in `MIPS(d + 1) + L2` | `.with_features(work_data, metric=..., order="internal")` (**`dim = d`**, mutable `SizeBoundedGraph`; or keeps `L2 (d+1)` if `compress` is an explicit `L2` `Metric`) | `MIPS(d+1)` yields stronger graph topology for unnormalized IP vectors; when inputs are already unit-norm (`is_l2_normalized(data)`), auto-switching to `"normalized"` avoids `MIPS(d+1)` overhead and enables `predict_quantization_normalized` |
+| `"ip"` / `"innerproduct"` / `"inner_product"` / `"mips"` | **`PRESORT_SCALED`:** `make_mips_transform(data, scale=True)` → FLAS in `FP32_L2` (`dim = d + 1`), or `FP32_InnerProduct` / `FP16_InnerProduct` (`dim = d`) if `is_l2_normalized(data)` | If `is_l2_normalized(data)`: behaves like `"normalized"` (`FP32_InnerProduct` / `FP16_InnerProduct`, no `MipsTransform`). Otherwise: presort runs on `PRESORT_SCALED` (`scale=True`), then graph construction runs on **`BUILD_UNSCALED`** (`make_mips_transform(work_data, scale=False)`, `[x, sqrt(M² - ||x||²)]` without `1/max_norm` scaling) → quantizes to target bit-width `L2` (`FP32_L2`, `FP16_L2`, `Uint7_L2` for `"8bit"`/`"auto"`, `Uint4_L2` for `"4bit"`/`"2bit"`) before `add_entry` and builds in `MIPS(d + 1) + L2` | `.with_features(work_data, metric=..., order="internal")` (**`dim = d`**, mutable `SizeBoundedGraph`) | `PRESORT_SCALED` + `BUILD_UNSCALED` yields stronger graph topology for unnormalized IP vectors; when inputs are already unit-norm (`is_l2_normalized(data)`), auto-switching to `"normalized"` avoids `MIPS(d+1)` overhead and enables `predict_quantization_normalized` |
 | Explicit `Metric` (e.g. `Metric.Int8_L2`, `Metric.EVP_InnerProduct`) | `FP32`/`FP16` L2 or IP matching `metric` (`presort=True` raises `ValueError` on pre-quantized inputs) | Quantizes `float32`/`float16` input before `add_entry` via `make_quantizer_pipeline(...)`; or ingests pre-quantized arrays directly | Mutable `SizeBoundedGraph` (or `ReadOnlyGraph` if `compress` is set) | Direct control without high-level spatial resolution |
+
+### `MipsTransform` Modes (`MIPS_SCALED` vs. `MIPS_UNSCALED`)
+- **`MIPS_SCALED` (`scale=True`, default):** Maps `x -> [x / M, sqrt(1 - ||x / M||^2)]` (`M = max_i ||x_i||`). Used by **`deglib.presort(..., metric="ip")`** (`PRESORT_SCALED`), **`deglib.compress`** / **`deglib.searcher`** (`FP32_IP | MIPS_SCALED`, `FP16_IP | MIPS_SCALED`, and explicit `L2` metrics on unnormalized `IP` graphs), and `fit_mips_transform_from_graph`.
+- **`MIPS_UNSCALED` (`scale=False`):** Maps `x -> [x, sqrt(M^2 - ||x||^2)]` without `1 / M` scaling. Used exclusively by **`deglib.build(..., metric="ip")`** during graph construction (`BUILD_UNSCALED`), after `presort` ran on `PRESORT_SCALED`.
 
 ### Unit-Norm Detection Tolerances
 - **`is_l2_normalized(data)`** (`transformation.py` for `"cosine"` / `"normalized"`): checks `| ||x||_2 - 1 | <= tol` with `tol = 1e-2` (`float16`) and `tol = 1e-3` (`float32`). Empty arrays (`n == 0`) are treated as normalized.
@@ -32,7 +36,7 @@ This reference documents the exact internal behavior of the high-level Python AP
 
 ## 2. `deglib.build(..., compress=...)` – Direct Compressed Build
 
-`deglib.build` quantizes **before** `add_entry` so the graph is constructed directly in the compressed format (for unnormalized `metric="ip"`, it builds in `MIPS(d + 1) + L2` at the corresponding bit-width before swapping back to `d`-dim `InnerProduct`; if `is_l2_normalized(data)` is true, `metric="ip"` automatically behaves like `"normalized"`). For post-build compression of an `FP32`/`FP16` graph, use `deglib.compress(graph, target)` or `deglib.searcher(graph, compress=target)`.
+`deglib.build` quantizes **before** `add_entry` so the graph is constructed directly in the compressed format (for unnormalized `metric="ip"`, it presorts in `PRESORT_SCALED` and builds in `BUILD_UNSCALED` `MIPS(d + 1) + L2` at the corresponding bit-width before swapping back to `d`-dim `InnerProduct`; if `is_l2_normalized(data)` is true, `metric="ip"` automatically behaves like `"normalized"`). For post-build compression of an `FP32`/`FP16` graph, use `deglib.compress(graph, target)` or `deglib.searcher(graph, compress=target)`.
 
 | `metric` | `compress` | Output Metric | Attached Query Transformations | `dim` | Backend |
 |---|---|---|---|---:|---|
@@ -51,7 +55,8 @@ This reference documents the exact internal behavior of the high-level Python AP
 | **`"ip"`** | `"8bit"` / `"auto"` | `Int8_InnerProduct` (`AVX512_VNNI`) | `[FastHadamardRotation, ScalarQuantizerInt8]` *(unnormalized)* | `d` | `SizeBoundedGraph` |
 | **`"ip"`** | `"4bit"` | `Int4_InnerProduct` | `[(FWHT), ScalarQuantizerInt4]` *(unnormalized)* | `d` | `SizeBoundedGraph` |
 | **`"ip"`** | `"2bit"` / `"evp"` | `EVP_InnerProduct` | `[EvpQuantizer]` *(unnormalized)* | `d` | `SizeBoundedGraph` |
-| **`"ip"`** | Explicit `L2` metric (e.g. `Metric.Uint7_L2`, `Metric.Int8_L2`) | Target `L2` metric | `[MipsTransform, (FWHT), ScalarQuantizer*]` | `d + 1` | `SizeBoundedGraph` |
+| **`"ip"`** | Explicit `L2` metric (e.g. `Metric.Uint7_L2`, `Metric.Int8_L2`) | *raises `ValueError`* | Contradicts `metric="ip"` (use `deglib.compress(graph, target)` after build if `L2` is intended) | — | — |
+| `"l2"` | Explicit `InnerProduct` metric (except `Metric.EVP_InnerProduct`) | *raises `ValueError`* | Contradicts `metric="l2"` (use `deglib.compress(graph, target)` after build if `IP` is intended) | — | — |
 
 ### Empty & Pre-Quantized Edge Cases in `deglib.build`
 - **`n_samples == 0`**: returns an empty `SizeBoundedGraph` (`dim = d`, `metric = FP32_*` or `FP16_*` for `float16`); `compress` is skipped (calling `deglib.compress` directly on an empty graph raises `ValueError`).
@@ -61,7 +66,7 @@ This reference documents the exact internal behavior of the high-level Python AP
 
 ## 3. `deglib.compress(graph, target)` & `deglib.searcher(graph, compress=...)`
 
-When `compress` is provided, `deglib.searcher(graph, compress=...)` calls `deglib.compress(graph, compress)` and then `search_graph.to_searcher(reranker=reranker, optimize=optimize, threads=threads)`.
+When `compress` is provided, `deglib.searcher(graph, compress=...)` calls `deglib.compress(graph, compress)` and then `search_graph.to_searcher(reranker=reranker, optimize=optimize, threads=threads)`. When `compress=None` and `graph` is an unnormalized `FP32_InnerProduct` / `FP16_InnerProduct` graph (no spatial prefix, not unit-norm), `deglib.searcher` automatically applies `MipsTransform` (`dim = d + 1`) while keeping `FP32_InnerProduct` / `FP16_InnerProduct` (`FP32_IP | MIPS_SCALED`, `FP16_IP | MIPS_SCALED`) and building any `reranker` from the original `d`-dim `InnerProduct` graph first.
 - **ISA rule:** `compress` does **not** pin the base `FP32` graph's resolved ISA (e.g. `AVX512`) onto `target_metric`, so `Int8_InnerProduct` / `Uint8_InnerProduct` automatically select `AVX512_VNNI` / `AVX2_VNNI` when supported.
 - **Invalid inputs:** calling `compress` (or `to_searcher(metric=...)` with a different dtype) on an already-quantized graph raises `ValueError`; `"32bit"` on an `FP16_*` graph raises `ValueError`; compressing an empty graph raises `ValueError`.
 
@@ -79,12 +84,12 @@ When `compress` is provided, `deglib.searcher(graph, compress=...)` calls `degli
 
 | `target` / `compress` | Target Metric | Transformations | Notes |
 |---|---|---|---|
-| `None` / `"32bit"` | `FP32_InnerProduct` | existing | Returns `graph` unchanged if already `FP32_InnerProduct` (raises `ValueError` if `graph` is `FP16_InnerProduct`) |
-| `"16bit"` | `FP16_InnerProduct` | `[ScalarQuantizerFP16]` | Native MIPS without reranker |
-| `"8bit"` / `"auto"` | `Uint7_L2` or `Int8_InnerProduct` | `[(FWHT), ScalarQuantizer*]` | Uses `predict_quantization(graph)` (**A1+A2** via `predict_quantization_normalized(..., is_cosine=has_l2n)`) on unit-sphere `cosine`/`normalized` graphs, and `Int8_InnerProduct` on unnormalized `InnerProduct` (`ip`) graphs |
+| `None` / `"32bit"` | `FP32_InnerProduct` | existing or `[MipsTransform(scale=True)]` | Unit-sphere `cosine`/`normalized` stays `FP32_InnerProduct` (`graph` unchanged); unnormalized `InnerProduct` (`ip`) uses **`FP32_InnerProduct` + `MIPS_SCALED` (`dim = d + 1`)** (`FP32_IP \| MIPS_SCALED`) in `deglib.compress(..., "32bit")` and `deglib.searcher(..., compress=None/"32bit")` (raises `ValueError` if `graph` is `FP16_InnerProduct` and `target="32bit"`) |
+| `"16bit"` | `FP16_InnerProduct` | `[ScalarQuantizerFP16]` or `[MipsTransform(scale=True), ScalarQuantizerFP16]` | Unit-sphere `cosine`/`normalized` uses `FP16_InnerProduct`; unnormalized `InnerProduct` (`ip`) uses **`FP16_InnerProduct` + `MIPS_SCALED` (`dim = d + 1`)** (`FP16_IP \| MIPS_SCALED`) in `deglib.compress(..., "16bit")` and `deglib.searcher(..., compress=None/"16bit")` |
+| `"8bit"` / `"auto"` | `Uint7_L2` or `Int8_InnerProduct` | `[(FWHT), ScalarQuantizer*]` | Uses `predict_quantization(graph)` (**A1+A2** via `predict_quantization_normalized(..., is_cosine=has_l2n)`) on unit-sphere `cosine`/`normalized` graphs, and `Int8_InnerProduct` (`NO_MIPS`, `d`-dim) on unnormalized `InnerProduct` (`ip`) graphs |
 | `"4bit"` | `Uint4_L2` or `Int4_InnerProduct` | `[(FWHT), ScalarQuantizer*]` | Uses `Uint4_L2` on unit-sphere `cosine`/`normalized` graphs (no `d+1` needed), and **`Int4_InnerProduct`** (`d`-dim, no `MipsTransform`) on unnormalized `InnerProduct` (`ip`) graphs |
 | `"2bit"` / `"evp"` | `EVP_InnerProduct` | `[EvpQuantizer]` | High-compression 2-bit filtering + reranking (`d`-dim, uniform without `MipsTransform` across all metrics) |
-| Explicit `L2` `Metric` (`Metric.Uint7_L2`, `Metric.Int8_L2`, `Metric.Uint4_L2`, `Metric.Uint8_L2`) | Target `L2` metric | `[MipsTransform?, (FWHT), ScalarQuantizer*]` *(auto-prepends `MipsTransform` via `mips=True` only when stored graph vectors are not unit-norm and have no prefix)* | Enables `L2` quantizers directly on `InnerProduct` graphs without adding `d+1` overhead on unit-norm `cosine`/`normalized` graphs |
+| Explicit `L2` `Metric` (`Metric.Uint7_L2`, `Metric.Int8_L2`, `Metric.Uint4_L2`, `Metric.Uint8_L2`) | Target `L2` metric | `[MipsTransform(scale=True)?, (FWHT), ScalarQuantizer*]` *(auto-prepends `MIPS_SCALED` via `mips=True` only when stored graph vectors are not unit-norm and have no prefix)* | Enables `L2` quantizers directly on `InnerProduct` graphs without adding `d+1` overhead on unit-norm `cosine`/`normalized` graphs |
 
 ### 3.3 8-Bit Quantizer Predictor Rules (`K5-Top` vs. `A1+A2`)
 
@@ -114,7 +119,7 @@ Empirical benchmark on both VIBE unnormalized IP datasets (`yi` 187,843 × 128D 
 - Never use `Uint4_InnerProduct` for unnormalized IP.
 - Never use `Uint4_L2` or `Int4_L2` on unnormalized IP without `MipsTransform` (`d+1`).
 - For `compress="4bit"` on unnormalized IP (`deglib.build(..., metric="ip")` and `deglib.compress` / `deglib.searcher`), always use **`Int4_InnerProduct`** in **`d` dimensions** (no `MipsTransform`).
-- For `compress="2bit"` / `"evp"` on `metric="ip"`, always swap back to **`EVP_InnerProduct`** in **`d` dimensions** (no `MipsTransform`) for uniform `d`-dim behavior across all `InnerProduct` compressions (`32bit`, `16bit`, `8bit`, `4bit`, `2bit`).
+- For `compress="2bit"` / `"evp"` on `metric="ip"`, always swap back to **`EVP_InnerProduct`** in **`d` dimensions** (no `MipsTransform`) for uniform `d`-dim behavior across quantized `InnerProduct` compressions (`8bit`, `4bit`, `2bit`), while `32bit`/`16bit` search/compression use `MIPS_SCALED` (`d+1`).
 
 ---
 

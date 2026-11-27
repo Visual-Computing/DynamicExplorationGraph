@@ -105,14 +105,16 @@ def make_l2_normalize_transform(vectors_or_dim: np.ndarray | int) -> FeatureTran
     return cpp_transformation.make_l2_normalize_transform(dim=dim)
 
 
-def make_mips_transform(vectors: np.ndarray, max_norm: float = 0.0) -> FeatureTransformation:
+def make_mips_transform(vectors: np.ndarray, max_norm: float = 0.0, scale: bool = True) -> FeatureTransformation:
     """
     Create and fit a spherical MIPS-to-L2 transformation (``d -> d + 1``).
 
-    On database vectors, appends ``sqrt(M^2 - ||x||^2)`` (with ``M`` calibrated as max norm when
-    ``max_norm <= 0``); on query vectors, appends ``0.0``.
+    When ``scale=True`` (default, ``MIPS_SCALED``), database vectors are mapped to
+    ``[x / M, sqrt(1 - ||x / M||^2)]``. When ``scale=False`` (``MIPS_UNSCALED``),
+    database vectors are mapped to ``[x, sqrt(M^2 - ||x||^2)]`` without ``1 / M`` scaling.
+    On query vectors, appends ``0.0`` after unit normalization.
     """
-    return cpp_transformation.make_mips_transform(vectors=vectors, max_norm=float(max_norm))
+    return cpp_transformation.make_mips_transform(vectors=vectors, max_norm=float(max_norm), scale=bool(scale))
 
 
 def make_fast_hadamard_rotation(

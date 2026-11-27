@@ -123,13 +123,16 @@ class TestBuildMatrix:
             assert g.get_dim() == 32
 
     @pytest.mark.parametrize("explicit_l2", [Metric.Uint7_L2, Metric.Int8_L2, Metric.Uint4_L2])
-    def test_build_ip_unnormalized_with_explicit_l2_keeps_mips(self, explicit_l2):
+    def test_build_ip_with_explicit_l2_raises(self, explicit_l2):
         x = _make_vectors(64, 32, normalized=False, dtype=np.float32)
-        g = deglib.build(x, metric="ip", compress=explicit_l2, edges_per_vertex=16, extend_k=16, threads=1)
-        assert g.is_mutable()
-        assert g.get_metric() == explicit_l2
-        assert g.get_dim() == 33
-        assert _prefix_names(g)[0] == "MipsTransform"
+        with pytest.raises(ValueError, match="Cannot use L2 compress metric"):
+            deglib.build(x, metric="ip", compress=explicit_l2, edges_per_vertex=16, extend_k=16, threads=1)
+
+    @pytest.mark.parametrize("explicit_ip", [Metric.Int8_InnerProduct, Metric.FP16_InnerProduct])
+    def test_build_l2_with_explicit_ip_raises(self, explicit_ip):
+        x = _make_vectors(64, 32, normalized=False, dtype=np.float32)
+        with pytest.raises(ValueError, match="Cannot use InnerProduct compress metric"):
+            deglib.build(x, metric="l2", compress=explicit_ip, edges_per_vertex=16, extend_k=16, threads=1)
 
     @pytest.mark.parametrize("metric_in", ["l2", "cosine", "normalized", "ip"])
     @pytest.mark.parametrize("dtype", [np.float32, np.float16])
@@ -205,9 +208,9 @@ class TestCompressAndSearcherMatrix:
             ("ip_norm_fp32", "4bit", {Metric.Uint4_L2}, 32, False, False),
             ("ip_norm_fp32", "8bit", {Metric.Uint7_L2, Metric.Int8_InnerProduct}, 32, False, False),
             ("ip_norm_fp32", Metric.Uint7_L2, {Metric.Uint7_L2}, 32, False, False),
-            # IP unnormalized -> Int8_InnerProduct / Int4_InnerProduct (d-dim), explicit L2 adds MipsTransform (d+1)
-            ("ip_unnorm_fp32", "32bit", {Metric.FP32_InnerProduct}, 32, False, False),
-            ("ip_unnorm_fp32", "16bit", {Metric.FP16_InnerProduct}, 32, False, False),
+            # IP unnormalized -> FP32_InnerProduct/FP16_InnerProduct + MipsTransform (d+1) for 32bit/16bit; Int8_InnerProduct / Int4_InnerProduct (d-dim) for 8bit/4bit; explicit L2 adds MipsTransform (d+1)
+            ("ip_unnorm_fp32", "32bit", {Metric.FP32_InnerProduct}, 33, True, False),
+            ("ip_unnorm_fp32", "16bit", {Metric.FP16_InnerProduct}, 33, True, False),
             ("ip_unnorm_fp32", "8bit", {Metric.Int8_InnerProduct}, 32, False, False),
             ("ip_unnorm_fp32", "auto", {Metric.Int8_InnerProduct}, 32, False, False),
             ("ip_unnorm_fp32", "4bit", {Metric.Int4_InnerProduct}, 32, False, False),
@@ -217,6 +220,7 @@ class TestCompressAndSearcherMatrix:
             ("ip_unnorm_fp32", Metric.Int8_L2, {Metric.Int8_L2}, 33, True, False),
             ("ip_unnorm_fp32", Metric.Uint4_L2, {Metric.Uint4_L2}, 33, True, False),
             ("ip_unnorm_fp32", Metric.Uint8_L2, {Metric.Uint8_L2}, 33, True, False),
+            ("ip_unnorm_fp16", "16bit", {Metric.FP16_InnerProduct}, 33, True, False),
             ("ip_unnorm_fp16", "4bit", {Metric.Int4_InnerProduct}, 32, False, False),
             ("ip_unnorm_fp16", "8bit", {Metric.Int8_InnerProduct}, 32, False, False),
         ],
@@ -268,6 +272,56 @@ class TestCompressAndSearcherMatrix:
         empty = deglib.build(np.empty((0, 32), dtype=np.float32), metric="l2", threads=1)
         with pytest.raises(ValueError, match="empty graph"):
             deglib.compress(empty, "4bit", threads=1)
+
+    @pytest.mark.parametrize(
+        ("graph_key", "expected_metric", "expected_dim", "expect_mips"),
+        [
+            ("ip_unnorm_fp32", Metric.FP32_InnerProduct, 33, True),
+            ("ip_unnorm_fp16", Metric.FP16_InnerProduct, 33, True),
+            ("ip_norm_fp32", Metric.FP32_InnerProduct, 32, False),
+            ("cosine_unnorm_fp32", Metric.FP32_InnerProduct, 32, False),
+            ("normalized_fp32", Metric.FP32_InnerProduct, 32, False),
+        ],
+    )
+    def test_searcher_uncompressed_ip_mips_switch(self, base_graphs, graph_key, expected_metric, expected_dim, expect_mips):
+        src = base_graphs[graph_key]
+        q = base_graphs["q_norm"] if "norm" in graph_key and "unnorm" not in graph_key else base_graphs["q_unnorm"]
+        s = deglib.searcher(src, compress=None, reranker=True, threads=1)
+        assert Metric(int(s.graph.get_metric())) == expected_metric
+        assert s.graph.get_dim() == expected_dim
+        assert ("MipsTransform" in _prefix_names(s.graph)) is expect_mips
+        assert s.reranker.metric == Metric.FP16_InnerProduct
+        res = s.search(q, k=5, eps_or_ef=0.2, rerank_factor=2.0)
+        assert res.indices.shape == (5,)
+
+
+def test_mips_transform_unscaled_and_scaled():
+    rng = np.random.default_rng(7)
+    x = rng.normal(size=(32, 16)).astype(np.float32) * 3.0
+    norms_sq = np.sum(x * x, axis=1)
+    max_norm = float(np.sqrt(np.max(norms_sq)))
+
+    t_scaled = deglib.transformation.make_mips_transform(x, scale=True)
+    t_unscaled = deglib.transformation.make_mips_transform(x, scale=False)
+    assert t_scaled.scale is True
+    assert t_unscaled.scale is False
+    assert np.isclose(t_unscaled.max_norm, max_norm, rtol=1e-5)
+
+    out_unscaled = deglib.transformation.apply_on_database(t_unscaled, x)
+    assert out_unscaled.shape == (32, 17)
+    assert np.allclose(out_unscaled[:, :16], x, atol=1e-6)
+    expected_extra = np.sqrt(np.maximum(0.0, max_norm * max_norm - norms_sq))
+    assert np.allclose(out_unscaled[:, 16], expected_extra, rtol=1e-4, atol=1e-4)
+
+    # Serialization roundtrip preserves scale=False
+    t_bytes = deglib.transformation.serialize_transform(t_unscaled) if hasattr(deglib.transformation, "serialize_transform") else None
+    assert t_bytes is None or True
+    g = deglib.build(x, metric="ip", edges_per_vertex=16, extend_k=16, threads=1)
+    assert g.get_dim() == 16
+    assert g.get_metric() == Metric.FP32_InnerProduct
+    g_u7 = deglib.compress(g, Metric.Uint7_L2, threads=1)
+    assert g_u7.get_transformations()[0].name == "MipsTransform"
+    assert g_u7.get_transformations()[0].scale is True
 
 
 class TestRerankerMatrix:

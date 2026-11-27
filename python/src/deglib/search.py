@@ -938,7 +938,19 @@ def searcher(
 
         search_graph = compress_graph(base_graph, compress, threads=threads)
     else:
-        search_graph = base_graph
+        from deglib.graph import _is_unnormalized_ip_graph
+
+        if _is_unnormalized_ip_graph(base_graph):
+            xfrms, target_space = base_graph._prepare_metric_transform(
+                Metric(int(base_graph.get_metric())),
+                use_rerank=(resolved_reranker is not None),
+                threads=threads,
+            )
+            search_graph = DynamicExplorationGraph(
+                base_graph.dynamic_exploration_graph_cpp._transform_readonly(xfrms, target_space, int(threads))
+            )
+        else:
+            search_graph = base_graph
     return search_graph.to_searcher(reranker=resolved_reranker, optimize=optimize, threads=threads)
 
 

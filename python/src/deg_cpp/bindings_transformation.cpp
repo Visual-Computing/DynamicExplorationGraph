@@ -98,6 +98,16 @@ inline std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation
     auto l2n = normalize ? std::make_shared<deglib::transformation::L2NormalizeTransform>(dim) : nullptr;
     auto mips_tr = mips ? detail::fit_mips_transform_from_graph(internal, dim, src_fp16) : nullptr;
 
+    if (target_dt == deglib::distances::MetricDataType::FP32) {
+        std::vector<std::shared_ptr<deglib::transformation::FeatureTransformation>> pipeline;
+        if (l2n) {
+            pipeline.push_back(std::move(l2n));
+        } else if (mips_tr) {
+            pipeline.push_back(std::move(mips_tr));
+        }
+        return pipeline;
+    }
+
     // Downstream quantizers (rotation, scalar/binary quantizers) must calibrate on the
     // post-prefix vectors (`sample_f32`), not on raw vectors. The full graph is transformed
     // later when the caller applies the returned pipeline.
@@ -395,6 +405,7 @@ void bind_transformation(nb::module_& m) {
 
     nb::class_<deglib::transformation::MipsTransform, deglib::transformation::FeatureTransformation>(transformation_module, "MipsTransform")
         .def_prop_ro("max_norm", &deglib::transformation::MipsTransform::max_norm)
+        .def_prop_ro("scale", &deglib::transformation::MipsTransform::scale)
         .def_static("deserialize", &deserialize_transform<deglib::transformation::MipsTransform>);
 
     nb::class_<deglib::transformation::EvpQuantizer, deglib::transformation::FeatureTransformation>(transformation_module, "EvpQuantizer")
@@ -699,12 +710,12 @@ void bind_transformation(nb::module_& m) {
 
     transformation_module.def(
         "make_mips_transform",
-        [](const InArray& vectors, float max_norm) {
+        [](const InArray& vectors, float max_norm, bool scale) {
             auto [count, dim] = get_2d_shape(vectors);
             if (count == 0 || dim == 0) {
                 throw std::invalid_argument("make_mips_transform: vectors must be a non-empty 2D array with dim > 0");
             }
-            auto t = std::make_shared<deglib::transformation::MipsTransform>(dim, max_norm);
+            auto t = std::make_shared<deglib::transformation::MipsTransform>(dim, max_norm, scale);
             if (max_norm <= 0.0f) {
                 const auto dt = vectors.dtype();
                 const bool is_fp16 = is_dtype_fp16_or_u16(dt);
@@ -727,7 +738,8 @@ void bind_transformation(nb::module_& m) {
             }
             return t;
         },
-        nb::arg("vectors"), nb::arg("max_norm") = 0.0f, "Factory function creating a MipsTransform (d -> d+1 spherical lift) fitted on vectors."
+        nb::arg("vectors"), nb::arg("max_norm") = 0.0f, nb::arg("scale") = true,
+        "Factory function creating a MipsTransform (d -> d+1 spherical lift) fitted on vectors."
     );
 
     transformation_module.def(

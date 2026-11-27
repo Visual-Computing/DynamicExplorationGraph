@@ -526,8 +526,13 @@ def build(
     ip_use_8bit_fwht = False
 
     if is_high_level_ip:
-        # metric="ip" builds topology in MIPS(d+1) L2 at the target bit-width, then swaps back to d-dim IP in step 5
+        # metric="ip" presorts in MIPS_SCALED (d+1) L2, then builds topology in MIPS_UNSCALED (d+1) L2
+        # at the target bit-width before swapping back to d-dim IP in step 5.
+        from deglib.transformation import make_mips_transform
+
         assert spatial_data is not None
+        unscaled_mips = make_mips_transform(work_data, max_norm=float(xfrms[0].max_norm), scale=False)
+        build_mips_data = apply_on_database(unscaled_mips, work_data, threads=threads)
         ip_build_metric: Metric | None = None
         if compress is None or comp_key in ("32bit", "fp32", "float32"):
             ip_finalize_metric = (
@@ -548,34 +553,41 @@ def build(
             ip_finalize_metric = Metric.EVP_InnerProduct
         else:
             resolved_comp = Metric.resolve(compress)
-            if Metric(int(resolved_comp)).name.endswith("InnerProduct"):
-                ip_finalize_metric = resolved_comp
-                dt_bits = (int(resolved_comp) & 0xF0)
-                if dt_bits == (int(Metric.FP16_InnerProduct) & 0xF0):
-                    ip_build_metric = Metric.FP16_L2
-                elif dt_bits in ((int(Metric.Int8_InnerProduct) & 0xF0), (int(Metric.Uint8_InnerProduct) & 0xF0), (int(Metric.Uint7_InnerProduct) & 0xF0)):
-                    ip_build_metric = Metric.Uint7_L2
-                elif dt_bits in ((int(Metric.Int4_InnerProduct) & 0xF0), (int(Metric.Uint4_InnerProduct) & 0xF0), (int(Metric.EVP_InnerProduct) & 0xF0)):
-                    ip_build_metric = Metric.Uint4_L2
-            else:
-                # Explicit L2 metric (e.g. Metric.Uint7_L2): build directly in target L2(d+1) and keep MipsTransform
-                ip_build_metric = resolved_comp
-                ip_finalize_metric = None
+            if not Metric(int(resolved_comp)).name.endswith("InnerProduct"):
+                raise ValueError(
+                    f"Cannot use L2 compress metric '{resolved_comp.name}' with metric={metric!r}; "
+                    "pass an InnerProduct metric (or use deglib.compress on the built graph)."
+                )
+            ip_finalize_metric = resolved_comp
+            dt_bits = (int(resolved_comp) & 0xF0)
+            if dt_bits == (int(Metric.FP16_InnerProduct) & 0xF0):
+                ip_build_metric = Metric.FP16_L2
+            elif dt_bits in (
+                (int(Metric.Int8_InnerProduct) & 0xF0),
+                (int(Metric.Uint8_InnerProduct) & 0xF0),
+                (int(Metric.Uint7_InnerProduct) & 0xF0),
+            ):
+                ip_build_metric = Metric.Uint7_L2
+            elif dt_bits in (
+                (int(Metric.Int4_InnerProduct) & 0xF0),
+                (int(Metric.Uint4_InnerProduct) & 0xF0),
+                (int(Metric.EVP_InnerProduct) & 0xF0),
+            ):
+                ip_build_metric = Metric.Uint4_L2
 
         if ip_build_metric is not None:
             quant_xfrms = make_quantizer_pipeline(
-                spatial_data,
+                build_mips_data,
                 ip_build_metric,
                 use_rerank=False,
                 threads=threads,
             )
-            build_data = apply_on_database(quant_xfrms, spatial_data, threads=threads)
-            xfrms = xfrms + quant_xfrms
+            build_data = apply_on_database(quant_xfrms, build_mips_data, threads=threads)
             resolved_metric = ip_build_metric
             base_metric = Metric(int(resolved_metric))
-            graph_dim = int(spatial_data.shape[1])
+            graph_dim = int(build_mips_data.shape[1])
         else:
-            build_data = assure_array(spatial_data, "data", resolved_metric.get_accepted_dtypes())
+            build_data = assure_array(build_mips_data, "data", resolved_metric.get_accepted_dtypes())
             graph_dim = int(build_data.shape[1])
     elif compress is not None:
         src_is_ip = base_metric.name.endswith("InnerProduct")
@@ -616,6 +628,15 @@ def build(
             comp_target = Metric.resolve(compress, "ip" if src_is_ip else "l2")
         else:
             comp_target = Metric.resolve(compress)
+            if (
+                not src_is_ip
+                and Metric(int(comp_target)).name.endswith("InnerProduct")
+                and Metric(int(comp_target)) != Metric.EVP_InnerProduct
+            ):
+                raise ValueError(
+                    f"Cannot use InnerProduct compress metric '{comp_target.name}' with metric={metric!r}; "
+                    "pass an L2 metric or 'evp' (or use deglib.compress on the built graph)."
+                )
 
         same_data_type = (int(comp_target) & 0xF0) == (int(base_metric) & 0xF0)
         if same_data_type:

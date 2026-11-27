@@ -395,7 +395,10 @@ class TestCompressRerankerSearcher:
         assert g2.get_dim() == 16
         assert [t.name for t in g2.get_transformations()] == ["EvpQuantizer"]
 
-        gu7 = deglib.build(x, metric="ip", compress=Metric.Uint7_L2, edges_per_vertex=16, extend_k=16, threads=1)
+        with pytest.raises(ValueError, match="Cannot use L2 compress metric"):
+            deglib.build(x, metric="ip", compress=Metric.Uint7_L2, edges_per_vertex=16, extend_k=16, threads=1)
+        g_ip = deglib.build(x, metric="ip", edges_per_vertex=16, extend_k=16, threads=1)
+        gu7 = deglib.compress(g_ip, Metric.Uint7_L2, threads=1)
         assert gu7.get_metric() == Metric.Uint7_L2
         assert gu7.get_dim() == 17
         assert gu7.get_transformations()[0].name == "MipsTransform"
