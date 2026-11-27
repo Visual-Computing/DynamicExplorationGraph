@@ -1,145 +1,105 @@
 """
-main.py — Maximum Inner Product Search (MIPS) Example (SISAP Challenge 2026 Task 2 mode5_flas).
+main.py — Maximum Inner Product Search (MIPS) Example (SISAP Challenge 2026 Task 2).
 
-Demonstrates fast construction and exploration of a MIPS graph on high-dimensional vectors
-(Llama embeddings) using Dynamic Exploration Graph (DEG), (d+1)-dimensional L2 transformation,
-1D FLAS pre-sorting, and FP16 inner product search.
+Demonstrates fast construction and exploration of a MIPS graph using the high-level
+`deglib` API (`metric="ip"`, `compress="16bit"` or `"8bit"`, FLAS pre-sorting, and `deglib.searcher`).
 
 Usage
 -----
-    uv run main.py                                      # Runs benchmark with default dataset
+    uv run main.py
+    uv run main.py --compress 8bit
 """
 
 from __future__ import annotations
 
 import argparse
-import sys
 import time
 from pathlib import Path
-import numpy as np
-import matplotlib.pyplot as plt
 
 import deglib
-import deglib_cpp
-from deglib.distances import Metric
-from deglib.cpu import InstructionSet
-from deglib.transformation import make_mips_transform
-from deglib.optimization import presort
+import matplotlib.pyplot as plt
+import numpy as np
 
-from dataset import (
-    ensure_mips_dataset,
-    load_hdf5_dataset,
-    compute_recall,
-)
+from dataset import compute_recall, ensure_mips_dataset, load_hdf5_dataset
 
+# --- 1. Shared defaults (apply to both 16bit and 8bit) ---
 DEFAULT_K_TOP = 30
-DEFAULT_K_GRAPH = 32
-DEFAULT_K_EXT = 64
-DEFAULT_EPS_EXT = 0.001
-DEFAULT_EPS_SEARCH = 0.18
-DEFAULT_MAX_DIST_LIST = [6000, 6500, 7000, 7500, 8000, 9000]
-DEFAULT_USE_FLAS = True
-DEFAULT_FLAS_DECAY = 0.9
+DEFAULT_K_GRAPH = 48
+DEFAULT_K_EXT = 96
+DEFAULT_EPS_EXT = 0.1
 DEFAULT_BUILD_THREADS = 1
 DEFAULT_SEARCH_THREADS = 8
-DEFAULT_OPT_TARGET = deglib.builder.OptimizationTarget.LowLID
-DEFAULT_NUM_RUNS = 100
-DEFAULT_INSTRUCTION_SET = InstructionSet.Auto
+DEFAULT_OPT_TARGET = deglib.OptimizationTarget.LowLID
+DEFAULT_SEED = 7
+DEFAULT_NUM_RUNS = 20
+DEFAULT_COMPRESS = "16bit"
+
+# --- 2. 16bit search defaults (FP16_InnerProduct + auto MIPS_SCALED, no reranker) ---
+DEFAULT_16BIT_EPS_LIST = [0.0056, 0.0057, 0.0058, 0.0059, 0.0060]
+DEFAULT_16BIT_RERANKER = None
+DEFAULT_16BIT_RERANK_FACTOR = 1.0
+DEFAULT_16BIT_MAX_DIST = 0
+
+# --- 3. 8bit search defaults (Int8_InnerProduct + FP16 reranker, ~60k QPS @ ~80% Recall@30) ---
+DEFAULT_8BIT_EPS_LIST = [0.11, 0.12, 0.13, 0.14]
+DEFAULT_8BIT_RERANKER = "16bit"
+DEFAULT_8BIT_RERANK_FACTOR = 1.6
+DEFAULT_8BIT_MAX_DIST = 6000
 
 
-def compute_1d_distortion(features: np.ndarray, sorted_indices: np.ndarray | None = None) -> float:
-    """
-    Compute the mean 1D L2 distance between adjacent vectors in the given order.
-
-    If sorted_indices is provided, vectors are accessed in that permutation order;
-    otherwise they are accessed in natural sequential order.
-    """
-    if features.shape[0] < 2:
-        return 0.0
-    if sorted_indices is not None:
-        ordered = features[sorted_indices]
-    else:
-        ordered = features
-    diffs = np.diff(ordered, axis=0)
-    dists = np.sqrt(np.einsum("ij,ij->i", diffs, diffs))
-    return float(dists.mean())
+def get_mode_defaults(compress: str) -> tuple[list[float], str | None, float, int]:
+    """Return (eps_list, reranker, rerank_factor, max_dist) defaults for the chosen precision."""
+    if compress == "8bit":
+        return (
+            DEFAULT_8BIT_EPS_LIST,
+            DEFAULT_8BIT_RERANKER,
+            DEFAULT_8BIT_RERANK_FACTOR,
+            DEFAULT_8BIT_MAX_DIST,
+        )
+    return (
+        DEFAULT_16BIT_EPS_LIST,
+        DEFAULT_16BIT_RERANKER,
+        DEFAULT_16BIT_RERANK_FACTOR,
+        DEFAULT_16BIT_MAX_DIST,
+    )
 
 
 def plot_mips_results(
     recalls: list[float],
-    search_times_ms: list[float],
-    max_dists: list[int],
+    qps_list: list[float],
+    eps_list: list[float],
     k_top: int,
-    eps_search: float,
+    compress: str = DEFAULT_COMPRESS,
     output_plot: str | None = None,
     no_show: bool = False,
-):
-    """
-    Renders a line plot with Total Search Time (ms) on the X-axis and Recall@k_top on the Y-axis.
-    """
+) -> None:
+    """Plot Recall@k_top (X-axis) against Queries Per Second (Y-axis)."""
     if not recalls or all(r < 0 for r in recalls):
         print("No valid recall data available for plotting.")
         return
 
     fig, ax = plt.subplots(figsize=(8, 6))
-
-    ax.plot(
-        search_times_ms,
-        recalls,
-        marker="o",
-        color="#C44E52",
-        linewidth=2,
-        markersize=7,
-        label=f"DEG MIPS (eps={eps_search})",
-    )
-
-    for t, r, md in zip(search_times_ms, recalls, max_dists):
+    ax.plot(recalls, qps_list, marker="o", color="#C44E52", linewidth=2, markersize=7, label=f"DEG MIPS ({compress})")
+    for r, qps, eps in zip(recalls, qps_list, eps_list):
         ax.annotate(
-            f"max_dist={md}\n({r * 100.0:.1f}%)",
-            xy=(t, r),
+            f"eps={eps:.4f}\n({r * 100.0:.2f}%)",
+            xy=(r, qps),
             xytext=(7, -10),
             textcoords="offset points",
             fontsize=9,
             fontweight="bold",
-            color="#2B2B2B",
         )
-
-    ax.set_xlabel("Total Search Time (ms)", fontsize=11, fontweight="bold")
-    ax.set_ylabel(f"Recall@{k_top}", fontsize=11, fontweight="bold")
-    ax.set_title(f"DEG MIPS Trade-off: Search Time vs. Recall@{k_top}", fontsize=12, fontweight="bold")
+    ax.set_xlabel(f"Recall@{k_top}", fontsize=11, fontweight="bold")
+    ax.set_ylabel("Queries Per Second (QPS)", fontsize=11, fontweight="bold")
+    ax.set_title(f"DEG MIPS Trade-off: Recall@{k_top} vs. QPS ({compress})", fontsize=12, fontweight="bold")
     ax.grid(True, which="both", linestyle="--", alpha=0.5)
-    ax.legend(loc="lower right")
-
+    ax.legend(loc="upper right")
     plt.tight_layout()
-
     if output_plot:
         plt.savefig(output_plot, dpi=300)
         print(f"Plot saved to {output_plot}")
-
     if not no_show:
         plt.show()
-
-
-def _make_build_callback(graph, total_count: int, t_build_start: float):
-    """
-    Create a build callback that prints progress every 10,000 vertices.
-    """
-    log_interval = 10000
-
-    def callback(status: deglib_cpp.BuilderStatus):
-        current_size = graph.size()
-        if current_size % log_interval == 0 or current_size == total_count:
-            now = time.perf_counter()
-            elapsed_s = now - t_build_start
-            vps = current_size / elapsed_s if elapsed_s > 0.001 else 0.0
-            pct = (current_size / total_count) * 100.0 if total_count > 0 else 0.0
-            print(
-                f"  [Build] {current_size:7d} / {total_count:7d} vertices ({pct:.1f}%) | "
-                f"{elapsed_s:.1f}s elapsed | {vps:6.0f} vert/s | improved: {status.improved}"
-            )
-            sys.stdout.flush()
-
-    return callback
 
 
 def construct_and_search_mips(
@@ -150,326 +110,119 @@ def construct_and_search_mips(
     k_graph: int = DEFAULT_K_GRAPH,
     k_ext: int = DEFAULT_K_EXT,
     eps_ext: float = DEFAULT_EPS_EXT,
-    use_flas: bool = DEFAULT_USE_FLAS,
-    flas_radius_decay: float = DEFAULT_FLAS_DECAY,
+    use_flas: bool = True,
+    compress: str = DEFAULT_COMPRESS,
     build_threads: int = DEFAULT_BUILD_THREADS,
     search_threads: int = DEFAULT_SEARCH_THREADS,
-    eps_search: float = DEFAULT_EPS_SEARCH,
-    max_dist_list: list[int] | None = None,
-    optimization_target: deglib.builder.OptimizationTarget = DEFAULT_OPT_TARGET,
+    eps_list: list[float] | None = None,
+    rerank_factor: float | None = None,
+    max_dist: int | None = None,
+    optimization_target: deglib.OptimizationTarget = DEFAULT_OPT_TARGET,
+    seed: int = DEFAULT_SEED,
     num_runs: int = DEFAULT_NUM_RUNS,
-    instruction: InstructionSet = DEFAULT_INSTRUCTION_SET,
-) -> dict[str, list[float] | float | list[int]]:
-    """
-    Constructs and evaluates a MIPS graph using DEG Mode 5 (L2 Build d+1, FP16 IP Search + FLAS).
-    """
-    if max_dist_list is None:
-        max_dist_list = DEFAULT_MAX_DIST_LIST
+) -> dict[str, list[float]]:
+    """Build a MIPS graph in FP32, convert to a compressed searcher, and sweep eps values."""
+    def_eps, reranker, def_rf, def_md = get_mode_defaults(compress)
+    eps_list = def_eps if eps_list is None else eps_list
+    rerank_factor = def_rf if rerank_factor is None else rerank_factor
+    max_dist = def_md if max_dist is None else max_dist
 
-    n_vecs, dims = train_vectors.shape
-    n_queries = query_vectors.shape[0]
-    print(
-        f"Dataset shape: {n_vecs} train vectors, {n_queries} queries, {dims} dimensions (dtype: {train_vectors.dtype})"
-    )
-    print(
-        f"MIPS Config: k_top={k_top}, k_graph={k_graph}, k_ext={k_ext}, eps_ext={eps_ext}, use_flas={use_flas}, "
-        f"opt_target={optimization_target.name}, "
-        f"build_threads={build_threads}, search_threads={search_threads}, num_runs={num_runs}, "
-        f"instruction={instruction.name}"
-    )
-
-    # 1. (d+1)-dimensional L2 Transformation Phase
+    # 1. Build graph in MIPS_UNSCALED space (handled internally by metric="ip"), then swap back to IP
     t0 = time.perf_counter()
-    mips_transform = make_mips_transform(train_vectors)
-    train_transformed = mips_transform.transform_database(train_vectors)
-    t_transform = time.perf_counter() - t0
-    new_dims = train_transformed.shape[1]
-    print(
-        f"L2 Transformation completed in {t_transform * 1000:.2f}ms (Max norm M = {mips_transform.max_norm:.6f}, new_dims = {new_dims})"
-    )
-
-    # 2. 1D FLAS Pre-Sorting Phase
-    t0 = time.perf_counter()
-    sorted_indices = None
-
-    if use_flas:
-        flas_metric = Metric.FP32_L2.with_instruction(instruction)
-        dist_before = compute_1d_distortion(train_transformed)
-        print(
-            f"Running FLAS 1D Pre-sorting: N={n_vecs}, dim={new_dims}, decay={flas_radius_decay}, metric={flas_metric.name} ({flas_metric.get_instruction().name}), threads={build_threads}..."
-        )
-
-        def flas_progress_cb(prog: float) -> bool:
-            pct = int(prog * 100.0)
-            if pct % 5 == 0 or prog >= 1.0:
-                print(f"\r  FLAS Progress: {pct:5.1f} %", end="", flush=True)
-            if prog >= 1.0:
-                print()
-            return False
-
-        sorted_indices = presort(
-            train_transformed,
-            metric=flas_metric,
-            radius_decay=flas_radius_decay,
-            threads=build_threads,
-            callback=flas_progress_cb,
-        )
-        t_flas = time.perf_counter() - t0
-
-        dist_after = compute_1d_distortion(train_transformed, sorted_indices)
-        improv = dist_before / dist_after if dist_after > 1e-7 else 0.0
-        print(
-            f"FLAS 1D Pre-sorting completed in {t_flas:.3f}s (Distortion: {dist_before:.4f} -> {dist_after:.4f}, improvement: {improv:.2f}x)"
-        )
-    else:
-        t_flas = time.perf_counter() - t0
-
-    # 3. Graph Construction Phase (in FP32_L2 space for d+1 dims)
-    t0 = time.perf_counter()
-    build_metric = Metric.FP32_L2.with_instruction(instruction)
-    print(
-        f"Building graph: k_graph={k_graph}, k_ext={k_ext}, eps_ext={eps_ext:.4f}, opt_target={optimization_target.name}, metric={build_metric.name} ({build_metric.get_instruction().name}), build_threads={build_threads}..."
-    )
     graph = deglib.build(
-        train_transformed,
+        train_vectors,
+        metric="ip",
         edges_per_vertex=k_graph,
-        metric=build_metric,
         optimization_target=optimization_target,
-        presort=sorted_indices if use_flas else False,
-        optimize=False,
         extend_k=k_ext,
         extend_eps=eps_ext,
-        improve_k=0,
-        improve_eps=0.0,
-        max_path_length=5,
+        seed=seed,
+        presort=use_flas,
+        optimize=False,
         threads=build_threads,
         show_progress=True,
     )
-
     t_build = time.perf_counter() - t0
-    print(f"Graph construction completed in {t_build:.3f}s")
 
-    # 5. FP16 Feature Quantization & Swap Phase
+    # 2. Create optimized ReadOnlyGraph searcher (compress="8bit" selects Int8_InnerProduct + FP16 reranker)
     t0 = time.perf_counter()
-    fp16_metric = Metric.FP16_InnerProduct.with_instruction(instruction)
-    fp16_graph = graph.with_features(
-        train_vectors,
-        metric=fp16_metric,
-        threads=build_threads,
-    )
-    t_swap = time.perf_counter() - t0
-    print(f"FP16 quantization & ReadOnlyGraph swap completed in {t_swap * 1000:.2f}ms")
-
-    # Queries are quantized automatically by fp16_graph during search
-    t_qconvert = 0.0
-
-    # 6. FP16 Inner Product Search Phase (Sweep over max_dist_list with num_runs averaging)
+    searcher = deglib.searcher(graph, compress=compress, reranker=reranker, optimize=True, threads=search_threads)
+    t_opt = time.perf_counter() - t0
     print(
-        f"\n--- FP16 Inner Product Search Sweep (eps_search={eps_search}, search_threads={search_threads}, num_runs={num_runs}) ---"
+        f"Build: {t_build:.2f}s | Optimize: {t_opt * 1000:.1f}ms | "
+        f"metric={searcher.graph.get_metric().name}, reranker={reranker}, "
+        f"instruction={searcher.graph.get_instruction().name}, dim={searcher.graph.get_dim()}"
     )
-    recalls = []
-    search_times_ms = []
-    qps_list = []
-    max_dists = []
 
-    best_recall = -1.0
-    best_search_time = 0.0
-    best_max_dist = max_dist_list[0]
+    # 3. Warmup run before timing so thread pool and caches are primed
+    _ = searcher.search(
+        query_vectors,
+        k=k_top,
+        eps_or_ef=eps_list[0],
+        rerank_factor=rerank_factor,
+        max_distance_computation_count=max_dist,
+        threads=search_threads,
+        return_distances=False,
+    )
 
-    for max_dist in max_dist_list:
-        run_times = []
-        for run in range(num_runs):
+    # 4. Sweep eps values and report median QPS across num_runs repetitions
+    recalls: list[float] = []
+    qps_list: list[float] = []
+    n_queries = query_vectors.shape[0]
+    for eps in eps_list:
+        times = []
+        for _ in range(num_runs):
             t0 = time.perf_counter()
-            indices = fp16_graph.search(
+            indices = searcher.search(
                 query_vectors,
-                eps_or_ef=eps_search,
                 k=k_top,
+                eps_or_ef=eps,
+                rerank_factor=rerank_factor,
                 max_distance_computation_count=max_dist,
                 threads=search_threads,
                 return_distances=False,
-                unsorted=False,
             ).indices
-            t_search = time.perf_counter() - t0
-            run_times.append(t_search)
-
-        avg_search_s = sum(run_times) / len(run_times)
-        total_search_s = avg_search_s + t_qconvert
-        search_time_ms = total_search_s * 1000.0
-
+            times.append(time.perf_counter() - t0)
+        times.sort()
+        med_s = times[len(times) // 2]
         recall = compute_recall(ground_truth, indices, k_top) if ground_truth is not None else -1.0
-        qps = n_queries / max(total_search_s, 1e-9)
-
+        qps = n_queries / max(med_s, 1e-9)
         recalls.append(recall)
-        search_times_ms.append(search_time_ms)
         qps_list.append(qps)
-        max_dists.append(max_dist)
-
-        if recall >= 0:
-            print(
-                f"  max_dist={max_dist:5d} | Recall@{k_top}: {recall * 100.0:6.2f}% | Search Time: {search_time_ms:6.1f}ms | QPS: {qps:8.1f}"
-            )
-        else:
-            print(f"  max_dist={max_dist:5d} | Search Time: {search_time_ms:6.1f}ms | QPS: {qps:8.1f}")
-
-        if recall > best_recall:
-            best_recall = recall
-            best_search_time = total_search_s
-            best_max_dist = max_dist
-
-    t_total_index = t_transform + t_flas + t_build + t_swap
-
-    print(f"\n--- Timing Summary ---")
-    if t_transform > 0:
-        print(f"Transform Time:        {t_transform * 1000:8.2f} ms")
-    if use_flas and t_flas > 0:
-        print(f"FLAS Presort Time:     {t_flas:8.3f} s")
-    print(f"Graph Build Time:      {t_build:8.3f} s")
-    print(f"FP16 Swap Time:        {t_swap * 1000:8.2f} ms")
-    print(f"Total Index Time:      {t_total_index:8.3f} s")
-    if best_recall >= 0:
         print(
-            f"Best Search Time:      {best_search_time * 1000.0:8.1f} ms (max_dist={best_max_dist}, Recall@{k_top}={best_recall * 100.0:.2f}%)"
+            f"  eps={eps:.4f} (md={max_dist}, rf={rerank_factor:.2f}) | "
+            f"Recall@{k_top}: {recall * 100.0:6.2f}% | {med_s * 1000.0:5.1f}ms | QPS: {qps:8.1f}"
         )
 
-    # FINAL SUMMARY table
-    total_elapsed_s = t_total_index + (t_qconvert / 1000.0) + (best_search_time / 1000.0)
-
-    print(f"\n========================================================================")
-    print(f"  FINAL SUMMARY (L2-structured Build, FP16 IP Search (FLAS) - Mode 5)")
-    print(f"========================================================================")
-    print(f"Load Time:             {0.0:8.1f} ms")
-    print(f"Quantize Time:         {t_transform * 1000:8.1f} ms")
-    print(f"Graph Build Time:      {t_build:8.1f} s")
-    print(f"Graph Conversion Time: {t_swap * 1000:8.1f} ms")
-    print(f"Explore Time:          {best_search_time * 1000:8.1f} ms")
-    print(f"Rerank Time:           {0.0:8.1f} ms")
-    print(f"FLAS Time:             {t_flas:8.1f} s")
-    print(f"Total Elapsed Time:    {total_elapsed_s:8.1f} s")
-    if best_recall >= 0:
-        print(f"Recall@{k_top}:             {best_recall * 100.0:8.2f} %")
-    print(f"------------------------------------------------------------------------")
-    print(f"Hyperparameters:")
-    print(f"  K_TOP:                 {k_top}")
-    print(f"  K_GRAPH:               {k_graph}")
-    print(f"  K_EXT:                 {k_ext}")
-    print(f"  EPS_EXT:               {eps_ext:.3f}")
-    print(f"  OPT_TARGET:            {optimization_target.name}")
-    print(f"  max_dist:              {best_max_dist}")
-    print(f"  threads:               {search_threads}")
-    print(f"------------------------------------------------------------------------")
-    print(f"Dataset Info:")
-    print(f"  Vectors:               {n_vecs}")
-    print(f"  Dimensions:            {dims}")
-    print(f"========================================================================")
-
-    return {
-        "transform_time": t_transform,
-        "flas_time": t_flas,
-        "build_time": t_build,
-        "swap_time": t_swap,
-        "qconvert_time": t_qconvert,
-        "total_index_time": t_total_index,
-        "total_elapsed_time": total_elapsed_s,
-        "recalls": recalls,
-        "search_times_ms": search_times_ms,
-        "qps_list": qps_list,
-        "max_dists": max_dists,
-        "best_recall": best_recall,
-        "best_search_time": best_search_time,
-    }
+    return {"recalls": recalls, "qps_list": qps_list, "eps_list": eps_list}
 
 
-def parse_opt_target(s: str) -> deglib.builder.OptimizationTarget:
-    """Parse optimization target string."""
-    s_lower = s.lower()
-    if s_lower in ("streamingdata", "streaming", "stream"):
-        return deglib.builder.OptimizationTarget.StreamingData
-    if s_lower in ("lowlid", "low"):
-        return deglib.builder.OptimizationTarget.LowLID
-    if s_lower in ("highlid", "high"):
-        return deglib.builder.OptimizationTarget.HighLID
-    raise ValueError(f"Unknown optimization target: {s}. Use StreamingData, LowLID, or HighLID.")
+def parse_eps_list(s: str) -> list[float]:
+    """Parse a comma-separated list of eps search thresholds."""
+    return [float(x.strip()) for x in s.split(",") if x.strip()]
 
 
-def parse_instruction(s: str) -> InstructionSet:
-    """Parse instruction set string."""
-    try:
-        return InstructionSet[s]
-    except KeyError:
-        valid = ", ".join(i.name for i in InstructionSet)
-        raise ValueError(f"Unknown instruction set: {s}. Valid options: {valid}")
-
-
-def parse_max_dist(s: str) -> list[int]:
-    """Parse comma-separated list of max distance budgets."""
-    return [int(x.strip()) for x in s.split(",") if x.strip()]
-
-
-def main():
-    parser = argparse.ArgumentParser(
-        description="Maximum Inner Product Search (MIPS) Example (SISAP Task 2 mode5_flas)"
-    )
-    parser.add_argument(
-        "--dataset", type=str, default="llama-dev", help="Path to HDF5 dataset file or 'llama-dev' (default: llama-dev)"
-    )
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Maximum Inner Product Search (MIPS) Example")
+    parser.add_argument("--dataset", type=str, default="llama-dev", help="Path to HDF5 dataset or 'llama-dev'")
     parser.add_argument("--k-graph", type=int, default=DEFAULT_K_GRAPH, help="Graph degree per vertex")
     parser.add_argument("--k-ext", type=int, default=DEFAULT_K_EXT, help="Builder search size parameter")
     parser.add_argument("--eps-ext", type=float, default=DEFAULT_EPS_EXT, help="Builder search expansion factor")
-    parser.add_argument("--eps-search", type=float, default=DEFAULT_EPS_SEARCH, help="Epsilon search factor")
-    parser.add_argument(
-        "--flas",
-        action=argparse.BooleanOptionalAction,
-        default=DEFAULT_USE_FLAS,
-        help="Enable or disable FLAS 1D pre-sorting",
-    )
-    parser.add_argument(
-        "--flas-decay", type=float, default=DEFAULT_FLAS_DECAY, help="FLAS neighborhood radius decay rate"
-    )
-    parser.add_argument(
-        "--build-threads", type=int, default=DEFAULT_BUILD_THREADS, help="Number of threads for graph building"
-    )
-    parser.add_argument(
-        "--search-threads", type=int, default=DEFAULT_SEARCH_THREADS, help="Number of parallel threads for query search"
-    )
-    opt_target_choices = [t.name for t in deglib.builder.OptimizationTarget]
-    parser.add_argument(
-        "--opt-target",
-        type=parse_opt_target,
-        default=DEFAULT_OPT_TARGET,
-        choices=opt_target_choices,
-        help="Optimization target: StreamingData, LowLID, HighLID (default: LowLID)",
-    )
-    parser.add_argument(
-        "--num-runs",
-        type=int,
-        default=DEFAULT_NUM_RUNS,
-        help="Number of search repetitions for averaging (default: 100)",
-    )
-    parser.add_argument(
-        "--max-dist",
-        type=parse_max_dist,
-        default=DEFAULT_MAX_DIST_LIST,
-        help="Comma-separated list of max distance budgets (default: 6000,6500,7000,7500,8000,9000)",
-    )
-    instruction_choices = [i.name for i in InstructionSet]
-    parser.add_argument(
-        "--instruction",
-        type=parse_instruction,
-        default=DEFAULT_INSTRUCTION_SET,
-        choices=instruction_choices,
-        help="SIMD instruction set: Auto, Scalar, AVX2, AVX512 (default: Auto)",
-    )
-    parser.add_argument("--output-plot", type=str, default=None, help="Path to save timing chart PNG")
-    parser.add_argument("--no-show", action="store_true", help="Disable GUI plot display")
-
+    parser.add_argument("--eps-list", type=parse_eps_list, default=None, help="Comma-separated eps values (default per mode)")
+    parser.add_argument("--compress", type=str, default=DEFAULT_COMPRESS, choices=["32bit", "16bit", "8bit"], help="Target precision")
+    parser.add_argument("--rerank-factor", type=float, default=None, help="Rerank candidate multiplier (default per mode)")
+    parser.add_argument("--max-dist", type=int, default=None, help="Max distance computations per query (default per mode)")
+    parser.add_argument("--flas", action=argparse.BooleanOptionalAction, default=True, help="Enable/disable FLAS pre-sorting")
+    parser.add_argument("--build-threads", type=int, default=DEFAULT_BUILD_THREADS, help="Threads for graph build")
+    parser.add_argument("--search-threads", type=int, default=DEFAULT_SEARCH_THREADS, help="Threads for query search")
+    parser.add_argument("--opt-target", type=deglib.OptimizationTarget.resolve, default=DEFAULT_OPT_TARGET, help="Optimization target")
+    parser.add_argument("--seed", type=int, default=DEFAULT_SEED, help="Random seed for FLAS and graph build")
+    parser.add_argument("--num-runs", type=int, default=DEFAULT_NUM_RUNS, help="Repetitions per eps for median QPS")
+    parser.add_argument("--output-plot", type=str, default=None, help="Path to save Recall vs. QPS PNG")
+    parser.add_argument("--no-show", action="store_true", help="Disable interactive plot window")
     args = parser.parse_args()
 
-    if args.dataset in (None, "llama-dev", "llama"):
-        dataset_path = ensure_mips_dataset()
-    else:
-        dataset_path = Path(args.dataset)
-
-    print(f"Loading dataset from {dataset_path}...")
+    dataset_path = ensure_mips_dataset() if args.dataset in (None, "llama-dev", "llama") else Path(args.dataset)
     train_data, query_data, gt_data = load_hdf5_dataset(dataset_path, k_top=DEFAULT_K_TOP)
 
     stats = construct_and_search_mips(
@@ -481,23 +234,24 @@ def main():
         k_ext=args.k_ext,
         eps_ext=args.eps_ext,
         use_flas=args.flas,
-        flas_radius_decay=args.flas_decay,
+        compress=args.compress,
         build_threads=args.build_threads,
         search_threads=args.search_threads,
-        eps_search=args.eps_search,
-        max_dist_list=args.max_dist,
+        eps_list=args.eps_list,
+        rerank_factor=args.rerank_factor,
+        max_dist=args.max_dist,
         optimization_target=args.opt_target,
+        seed=args.seed,
         num_runs=args.num_runs,
-        instruction=args.instruction,
     )
 
     if args.output_plot or not args.no_show:
         plot_mips_results(
             recalls=stats["recalls"],
-            search_times_ms=stats["search_times_ms"],
-            max_dists=stats["max_dists"],
+            qps_list=stats["qps_list"],
+            eps_list=stats["eps_list"],
             k_top=DEFAULT_K_TOP,
-            eps_search=args.eps_search,
+            compress=args.compress,
             output_plot=args.output_plot,
             no_show=args.no_show,
         )
