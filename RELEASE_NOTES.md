@@ -1,5 +1,34 @@
 # Release Notes
 
+## deglib v0.3.2
+
+### Overview
+deglib v0.3.2 makes building and searching compressed graphs simpler and more memory-efficient, and delivers **~20% faster search on `FP32` and `FP16` graphs**: `deglib.build()` now constructs graphs directly at the target precision while keeping them mutable, automatically enables FLAS presorting on float datasets and unit-norm detection for inner-product data, adds convenient `reranker` shorthands to `deglib.searcher()`, and improves auto-tuning accuracy.
+
+### 🚀 What's New & Improved
+* **~20% Faster `FP32` & `FP16` Search:**
+  * Optimized neighbor distance evaluation during graph traversal speeds up search on `FP32` and `FP16` graphs (as well as `EVP_InnerProduct`) by around 20%.
+* **Lower-RAM Compressed Builds & Mutable Graphs (`deglib.build`):**
+  * `deglib.build(..., compress=...)` now quantizes and transforms vectors up front in parallel so the graph is built directly in its target compressed representation — reducing peak build RAM while still returning a mutable `DynamicExplorationGraph` you can inspect or extend.
+  * `presort=None` (new default) automatically runs FLAS presorting on `float32` / `float16` inputs and skips it for pre-quantized inputs (`True`, `False`, or a custom permutation array still override it).
+  * `metric="ip"` automatically detects unit-norm vectors and switches to normalized cosine handling, and uses `d`-dimensional `Int4_InnerProduct` (`"4bit"`) and `EVP_InnerProduct` (`"2bit"` / `"evp"`).
+* **Simpler Reranking & Consistent 4-Bit Compression:**
+  * `deglib.searcher(..., reranker=...)` now accepts shorthands such as `reranker=True` (defaulting to `"16bit"` reranking) or a precision/metric string (e.g., `"16bit"`, `Metric.FP16_L2`), eliminating manual `Reranker` setup for common cases.
+  * `deglib.compress(..., "4bit")` and `deglib.searcher(..., "4bit")` consistently select `Uint4_L2` on `L2` and unit-norm (`cosine` / `normalized`) graphs, and `Int4_InnerProduct` on unnormalized inner-product graphs.
+* **More Accurate Auto-Tuning (`deglib.tuning`):**
+  * Upgraded `predict_optimization_target` and `predict_quantization` for more reliable `LowLID` vs. `StreamingData` and 8-bit quantization recommendations across diverse datasets.
+
+### ⚠️ Breaking Changes
+* **`deglib.build()` Return Type & Default `presort`:** `build()` now always returns a mutable `DynamicExplorationGraph` (even when `compress` is set) and enables `presort` automatically on float inputs (`presort=None` default instead of `False`).
+* **Removed `deglib.graph.load_graph`:** Use top-level `deglib.load_graph(...)` (now an alias for `deglib.graph.load_readonly_graph`) instead.
+* **Hidden `set_transformations`:** `DynamicExplorationGraph.set_transformations` is now internal (`_set_transformations`); configure transformations via `build()`, `compress()`, or `Reranker` instead.
+
+### 🛠️ Bug Fixes
+* Fixed `deglib.compress(..., "4bit")` on unit-norm `InnerProduct` graphs so they properly use `Uint4_L2` instead of `Int4_InnerProduct`.
+* Fixed 8-bit auto-selection during `build()` when `compress="8bit"` or `"auto"` is used.
+
+---
+
 ## deglib v0.3.1
 
 ### Overview
