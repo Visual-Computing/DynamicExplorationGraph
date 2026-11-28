@@ -325,7 +325,8 @@ nb::ndarray<nb::numpy, uint32_t, nb::ndim<1>, nb::c_contig> presort_wrapper(
     const deglib::distances::FloatSpace& space,
     float radius_decay,
     size_t threads,
-    nb::object callback
+    nb::object callback,
+    uint32_t seed
 ) {
     if (vectors.ndim() != 2) {
         throw std::invalid_argument("vectors must be a 2D float32/float16 array");
@@ -361,7 +362,7 @@ nb::ndarray<nb::numpy, uint32_t, nb::ndim<1>, nb::c_contig> presort_wrapper(
     std::vector<uint32_t> sorted_indices;
     {
         nb::gil_scoped_release release;
-        sorted_indices = deglib::optimization::presort(vec_ptr, count, space, radius_decay, threads, cb);
+        sorted_indices = deglib::optimization::presort(vec_ptr, count, space, radius_decay, threads, cb, seed);
     }
 
     uint32_t* out_ptr = nullptr;
@@ -755,7 +756,7 @@ void bind_graph_and_builder(nb::module_& m) {
     m.def("load_sizebounded_graph", &load_sizebounded_graph_wrapper, nb::arg("path"), nb::arg("capacity") = 0);
     m.def(
         "presort", &presort_wrapper, nb::arg("vectors"), nb::arg("space"), nb::arg("radius_decay") = 0.9f, nb::arg("threads") = 0,
-        nb::arg("callback") = nb::none()
+        nb::arg("callback") = nb::none(), nb::arg("seed") = 42
     );
 
     m.def(

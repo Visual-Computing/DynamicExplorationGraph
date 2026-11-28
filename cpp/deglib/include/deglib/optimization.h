@@ -23,6 +23,7 @@ namespace deglib::optimization {
  * @param radius_decay Decay factor per iteration for neighborhood radius (default 0.9).
  * @param numThreads Number of worker threads (0 = use hardware concurrency).
  * @param callback Optional progress callback returning true to cancel early.
+ * @param seed Random seed for FLAS initialization (default 42).
  * @return std::vector<uint32_t> Permutation array of original vector indices [0..count-1] in sorted order.
  */
 inline std::vector<uint32_t> presort(
@@ -31,7 +32,8 @@ inline std::vector<uint32_t> presort(
     const deglib::distances::FloatSpace& space,
     float radius_decay = 0.9f,
     size_t numThreads = 0,
-    std::function<bool(float)> callback = nullptr
+    std::function<bool(float)> callback = nullptr,
+    uint32_t seed = 42
 ) {
     if (count == 0) return {};
 
@@ -39,7 +41,7 @@ inline std::vector<uint32_t> presort(
     flas::FlasSettings settings;
     settings.radius_decay = radius_decay;
 
-    std::mt19937 rng(42);
+    std::mt19937 rng(seed);
     auto cb = callback ? callback : [](float) { return false; };
     const bool mt = (numThreads != 1);
 

@@ -6,7 +6,7 @@ void bind_optimization(nb::module_& m) {
     nb::module_ optimization_module = m.def_submodule("optimization", "Graph optimization and layout utilities");
     optimization_module.def(
         "presort", &presort_wrapper, nb::arg("vectors"), nb::arg("space"), nb::arg("radius_decay") = 0.9f, nb::arg("threads") = 0,
-        nb::arg("callback") = nb::none(), "Perform 1D pre-sorting of dataset feature vectors using FLAS"
+        nb::arg("callback") = nb::none(), nb::arg("seed") = 42, "Perform 1D pre-sorting of dataset feature vectors using FLAS"
     );
     optimization_module.def(
         "prune_non_mrng_edges",

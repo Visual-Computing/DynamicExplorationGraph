@@ -235,7 +235,8 @@ nb::ndarray<nb::numpy, uint32_t, nb::ndim<1>, nb::c_contig> presort_wrapper(
     const deglib::distances::FloatSpace& space,
     float radius_decay = 0.9f,
     size_t threads = 0,
-    nb::object callback = nb::none()
+    nb::object callback = nb::none(),
+    uint32_t seed = 42
 );
 
 namespace deglib_py {

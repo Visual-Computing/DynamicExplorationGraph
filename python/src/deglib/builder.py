@@ -360,7 +360,7 @@ def build(
     improve_tries : int, default=0
         Number of improvement passes per step.
     seed : int, default=7
-        Random seed used during graph construction.
+        Random seed used during FLAS pre-sorting and graph construction.
     presort : bool, np.ndarray, or None, default=None
         Controls FLAS 1D pre-sorting before construction (reordering data and labels together):
         ``None`` (default) enables FLAS pre-sorting automatically for ``float32`` / ``float16``
@@ -499,6 +499,7 @@ def build(
                 metric=flas_metric,
                 threads=threads,
                 show_progress=effective_show_progress,
+                seed=seed,
             )
             work_data = np.ascontiguousarray(work_data[sorted_idx])
             if spatial_data is not None:

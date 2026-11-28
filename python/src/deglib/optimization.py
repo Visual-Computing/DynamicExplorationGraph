@@ -44,6 +44,7 @@ def presort(
     threads: int = 0,
     callback: Optional[Callable[[float], Optional[bool]]] = None,
     show_progress: bool = False,
+    seed: int = 42,
 ) -> np.ndarray:
     """
     Perform 1D pre-sorting of dataset feature vectors using FLAS (Fast Linear Alignment Scheme).
@@ -60,6 +61,7 @@ def presort(
         threads: Number of worker threads (``0`` = all CPU cores).
         callback: Optional callback receiving progress in ``[0.0, 1.0]``; returning ``False`` cancels.
         show_progress: If True, prints a live progress bar to stdout.
+        seed: Random seed for FLAS initialization (default ``42``).
 
     Returns:
         1D ``uint32`` array of sorted dataset indices of length ``N``.
@@ -135,6 +137,7 @@ def presort(
             radius_decay=radius_decay,
             threads=threads,
             callback=wrapped_callback,
+            seed=int(seed),
         )
     finally:
         if show_progress:
