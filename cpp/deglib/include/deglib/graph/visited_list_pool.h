@@ -31,6 +31,8 @@ class VisitedList {
 
     [[nodiscard]] auto get_tag() const { return current_tag_; }
 
+    [[nodiscard]] uint32_t num_elements() const noexcept { return num_elements_; }
+
     void reset() {
         ++current_tag_;
         if (current_tag_ == 0) {

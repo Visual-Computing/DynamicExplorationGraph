@@ -13,6 +13,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -113,8 +114,20 @@ struct alignas(64) SearchWorkspace {
     uint32_t graph_hop_count = 0;       ///< Number of vertex expansions (hops) performed.
     bool used_pool = false;             ///< True when results live in `pool` (ef), false when in `results` (eps).
 
-    alignas(64) ResultSet results;           ///< Max-heap result container populated by eps search.
-    alignas(64) UncheckedSet next_vertices;  ///< Min-heap exploration frontier used by eps and efQueue search.
+    alignas(64) ResultSet results;              ///< Max-heap result container populated by eps search.
+    alignas(64) UncheckedSet next_vertices;     ///< Min-heap exploration frontier used by eps and efQueue search.
+    std::unique_ptr<VisitedList> visited_list;  ///< Per-workspace visited table (avoids VisitedListPool mutex per query).
+
+    /// Returns a reset VisitedList sized for at least `num_elements` vertices without pool locking.
+    [[nodiscard]] VisitedList* acquire_visited_list(size_t num_elements) {
+        const uint32_t needed = static_cast<uint32_t>(num_elements);
+        if (!visited_list || visited_list->num_elements() < needed) {
+            visited_list = std::make_unique<VisitedList>(needed);
+        } else {
+            visited_list->reset();
+        }
+        return visited_list.get();
+    }
 
     /// Resets buffers and telemetry counters for an eps search.
     void reset_for_eps(size_t k, size_t edges_per_vertex) noexcept {
@@ -812,7 +825,7 @@ class InternalGraph {
         const auto dist_func_param = self.feature_space_.get_dist_func_param();
 
         // set of checked vertex ids
-        const auto vl = self.visited_list_pool_->getFreeVisitedList();
+        auto* vl = ws.acquire_visited_list(vertex_count);
         auto* checked_ids = vl->get_visited();
         const auto checked_ids_tag = vl->get_tag();
 
@@ -1027,7 +1040,7 @@ class InternalGraph {
         const auto dist_func_param = self.feature_space_.get_dist_func_param();
 
         // set of checked vertex ids
-        const auto vl = self.visited_list_pool_->getFreeVisitedList();
+        auto* vl = ws.acquire_visited_list(vertex_count);
         auto* checked_ids = vl->get_visited();
         const auto checked_ids_tag = vl->get_tag();
 
@@ -1180,7 +1193,7 @@ class InternalGraph {
             const auto dist_func_param = self.feature_space_.get_dist_func_param();
 
             // set of checked vertex ids
-            const auto vl = self.visited_list_pool_->getFreeVisitedList();
+            auto* vl = ws.acquire_visited_list(vertex_count);
             auto* checked_ids = vl->get_visited();
             const auto checked_ids_tag = vl->get_tag();
 

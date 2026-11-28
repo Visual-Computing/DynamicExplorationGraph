@@ -4,11 +4,117 @@
 
 #include <algorithm>
 #include <atomic>
+#include <condition_variable>
+#include <functional>
 #include <mutex>
 #include <thread>
 #include <vector>
 
 namespace deglib::concurrent {
+
+namespace detail {
+
+/**
+ * Lightweight persistent worker pool backing `parallel_for` and `parallel_batch_for`.
+ *
+ * Keeps OS threads (and their `thread_local` workspaces) alive across calls so repeated
+ * short parallel batches avoid `std::thread` spawn/join and workspace reallocation overhead.
+ * Re-entrant or concurrent callers fall back to ad-hoc `std::thread` execution without blocking.
+ */
+class PersistentThreadPool {
+  public:
+    PersistentThreadPool() = default;
+    PersistentThreadPool(const PersistentThreadPool&) = delete;
+    PersistentThreadPool& operator=(const PersistentThreadPool&) = delete;
+
+    template <class WorkerFn>
+    bool try_run(size_t actual_threads, WorkerFn&& worker) {
+        if (busy_.exchange(true, std::memory_order_acquire)) {
+            return false;
+        }
+        struct BusyGuard {
+            std::atomic<bool>& flag;
+            ~BusyGuard() noexcept { flag.store(false, std::memory_order_release); }
+        } guard{busy_};
+
+        std::atomic<size_t> remaining(actual_threads - 1);
+        {
+            std::lock_guard<std::mutex> lk(mtx_);
+            while (workers_.size() < actual_threads - 1) {
+                const size_t tid = workers_.size() + 1;
+                workers_.emplace_back([this, tid] { worker_loop(tid); });
+            }
+            job_fn_ = [&](size_t tid) { worker(tid); };
+            active_threads_ = actual_threads;
+            remaining_ = &remaining;
+            ++generation_;
+        }
+        work_cv_.notify_all();
+
+        worker(0);  // caller participates as worker 0
+
+        if (remaining.load(std::memory_order_acquire) > 0) {
+            std::unique_lock<std::mutex> lk(mtx_);
+            done_cv_.wait(lk, [&] { return remaining.load(std::memory_order_acquire) == 0; });
+        }
+        return true;
+    }
+
+  private:
+    void worker_loop(size_t tid) {
+        size_t my_gen = 0;
+        while (true) {
+            std::function<void(size_t)> fn;
+            std::atomic<size_t>* rem_ptr = nullptr;
+            {
+                std::unique_lock<std::mutex> lk(mtx_);
+                work_cv_.wait(lk, [&] { return generation_ != my_gen && tid < active_threads_; });
+                my_gen = generation_;
+                fn = job_fn_;
+                rem_ptr = remaining_;
+            }
+            fn(tid);
+            if (rem_ptr->fetch_sub(1, std::memory_order_acq_rel) == 1) {
+                std::lock_guard<std::mutex> lk(mtx_);
+                done_cv_.notify_one();
+            }
+        }
+    }
+
+    std::atomic<bool> busy_{false};
+    std::mutex mtx_;
+    std::condition_variable work_cv_;
+    std::condition_variable done_cv_;
+    std::vector<std::thread> workers_;
+    std::function<void(size_t)> job_fn_;
+    std::atomic<size_t>* remaining_ = nullptr;
+    size_t active_threads_ = 1;
+    size_t generation_ = 0;
+};
+
+inline PersistentThreadPool& default_pool() {
+    // Intentional process-lifetime singleton (avoids Windows DLL_PROCESS_DETACH join deadlocks).
+    static auto* pool = new PersistentThreadPool();
+    return *pool;
+}
+
+template <class WorkerFn>
+inline void run_workers(size_t actual_threads, WorkerFn&& worker) {
+    if (default_pool().try_run(actual_threads, worker)) {
+        return;
+    }
+    std::vector<std::thread> threads;
+    threads.reserve(actual_threads - 1);
+    for (size_t thread_id = 1; thread_id < actual_threads; ++thread_id) {
+        threads.emplace_back(worker, thread_id);
+    }
+    worker(0);
+    for (auto& thread : threads) {
+        thread.join();
+    }
+}
+
+}  // namespace detail
 
 // Multithreaded executor
 // The helper function copied from https://github.com/nmslib/hnswlib/blob/master/examples/cpp/example_mt_search.cpp (and that itself is copied from nmslib)
@@ -19,51 +125,43 @@ inline void parallel_for(size_t start, size_t end, size_t numThreads, Function f
         numThreads = std::thread::hardware_concurrency();
     }
 
-    if (numThreads == 1) {
+    const size_t count = end - start;
+    if (count == 0) {
+        return;
+    }
+
+    const size_t actualThreads = std::min(std::max<size_t>(1, numThreads), count);
+    if (actualThreads == 1) {
         for (size_t id = start; id < end; id++) {
             fn(id, 0);
         }
-    } else {
-        std::vector<std::thread> threads;
-        std::atomic<size_t> current(start);
+        return;
+    }
 
-        // keep track of exceptions in threads
-        // https://stackoverflow.com/a/32428427/1713196
-        std::exception_ptr lastException = nullptr;
-        std::mutex lastExceptMutex;
+    std::atomic<size_t> current(start);
+    std::exception_ptr lastException = nullptr;
+    std::mutex lastExceptMutex;
 
-        for (size_t threadId = 0; threadId < numThreads; ++threadId) {
-            threads.push_back(std::thread([&, threadId] {
-                while (true) {
-                    size_t id = current.fetch_add(1);
-
-                    if (id >= end) {
-                        break;
-                    }
-
-                    try {
-                        fn(id, threadId);
-                    } catch (...) {
-                        std::unique_lock<std::mutex> lastExcepLock(lastExceptMutex);
-                        lastException = std::current_exception();
-                        /*
-                         * This will work even when current is the largest value that
-                         * size_t can fit, because fetch_add returns the previous value
-                         * before the increment (what will result in overflow
-                         * and produce 0 instead of current + 1).
-                         */
-                        current = end;
-                        break;
-                    }
-                }
-            }));
+    auto worker = [&](size_t threadId) {
+        while (true) {
+            const size_t id = current.fetch_add(1, std::memory_order_relaxed);
+            if (id >= end) {
+                break;
+            }
+            try {
+                fn(id, threadId);
+            } catch (...) {
+                std::unique_lock<std::mutex> lastExcepLock(lastExceptMutex);
+                lastException = std::current_exception();
+                current.store(end, std::memory_order_relaxed);
+                break;
+            }
         }
-        for (auto& thread : threads) {
-            thread.join();
-        }
-        if (lastException) {
-            std::rethrow_exception(lastException);
-        }
+    };
+
+    detail::run_workers(actualThreads, worker);
+    if (lastException) {
+        std::rethrow_exception(lastException);
     }
 }
 
@@ -100,7 +198,7 @@ inline void parallel_batch_for(size_t start, size_t end, size_t numThreads, Func
         return;
     }
 
-    const size_t actualThreads = std::min(numThreads, count);
+    const size_t actualThreads = std::min(std::max<size_t>(1, numThreads), count);
     if (actualThreads == 1) {
         fn(start, end, 0);
         return;
@@ -117,15 +215,12 @@ inline void parallel_batch_for(size_t start, size_t end, size_t numThreads, Func
     const size_t rem = count % numChunks;
 
     std::atomic<size_t> current(0);
-    std::vector<std::thread> threads;
-
-    // keep track of exceptions in threads (same scheme as parallel_for)
     std::exception_ptr lastException = nullptr;
     std::mutex lastExceptMutex;
 
     auto worker = [&](size_t threadId) {
         while (true) {
-            size_t c = current.fetch_add(1);
+            const size_t c = current.fetch_add(1, std::memory_order_relaxed);
             if (c >= numChunks) {
                 break;
             }
@@ -136,20 +231,13 @@ inline void parallel_batch_for(size_t start, size_t end, size_t numThreads, Func
             } catch (...) {
                 std::unique_lock<std::mutex> lastExcepLock(lastExceptMutex);
                 lastException = std::current_exception();
-                current = numChunks;  // stop the remaining workers
+                current.store(numChunks, std::memory_order_relaxed);
                 break;
             }
         }
     };
 
-    threads.reserve(actualThreads - 1);
-    for (size_t threadId = 1; threadId < actualThreads; ++threadId) {
-        threads.emplace_back(worker, threadId);
-    }
-    worker(0);  // caller participates
-    for (auto& thread : threads) {
-        thread.join();
-    }
+    detail::run_workers(actualThreads, worker);
     if (lastException) {
         std::rethrow_exception(lastException);
     }
